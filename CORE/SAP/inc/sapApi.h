@@ -2489,11 +2489,21 @@ VOS_STATUS wlansap_set_invalid_session(v_PVOID_t pctx);
 VOS_STATUS
 WLANSAP_set_sub20_channelwidth_with_csa(
 	void *vos_ctx_ptr, uint32_t chan_width);
+VOS_STATUS
+WLANSAP_get_sub20_channelwidth(void *vos_ctx_ptr, uint32_t *chan_width);
+
 #else
 static inline VOS_STATUS
 WLANSAP_set_sub20_channelwidth_with_csa(
 	void *vos_ctx_ptr, uint32_t chan_width)
 {
+	return VOS_STATUS_SUCCESS;
+}
+
+static inline VOS_STATUS
+WLANSAP_get_sub20_channelwidth(void *vos_ctx_ptr, uint32_t *chan_width)
+{
+	*chan_width = 0;
 	return VOS_STATUS_SUCCESS;
 }
 #endif
