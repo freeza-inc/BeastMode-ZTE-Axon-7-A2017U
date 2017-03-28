@@ -102,6 +102,7 @@
 #define DEVICE_IFACE_OPENED    (5)
 #define TDLS_INIT_DONE         (6)
 #define ACS_PENDING            (7)
+#define SOFTAP_INIT_DONE       (8)
 
 /* HDD global event flags */
 #define ACS_IN_PROGRESS        (0)
@@ -989,8 +990,6 @@ struct hdd_rate_info {
  * @rx_bytes: bytes received from this station
  * @rx_retries: cumulative retry counts
  * @tx_failed: number of failed transmissions
- * @last_tx_rate: last used tx bitrate (kbps)
- * @last_rx_rate: last used rx bitrate (kbps)
  * @rssi: The signal strength (dbm)
  * @tx_rate: last used tx rate info
  * @rx_rate: last used rx rate info
@@ -1004,8 +1003,6 @@ struct hdd_fw_txrx_stats {
 	uint64_t rx_bytes;
 	uint32_t tx_retries;
 	uint32_t tx_failed;
-	uint32_t last_tx_rate;
-	uint32_t last_rx_rate;
 	int8_t rssi;
 	struct hdd_rate_info tx_rate;
 	struct hdd_rate_info rx_rate;
@@ -2099,6 +2096,7 @@ struct hdd_context_s
     v_U8_t last_scan_reject_session_id;
     scan_reject_states last_scan_reject_reason;
     v_TIME_t last_scan_reject_timestamp;
+    uint8_t hdd_dfs_regdomain;
 };
 
 /*---------------------------------------------------------------------------
@@ -2475,7 +2473,8 @@ void hdd_connect_result(struct net_device *dev, const u8 *bssid,
 			tCsrRoamInfo *roam_info, const u8 *req_ie,
 			size_t req_ie_len, const u8 * resp_ie,
 			size_t resp_ie_len, u16 status, gfp_t gfp,
-			bool connect_timeout);
+			bool connect_timeout,
+			tSirResultCodes timeout_reason);
 
 int wlan_hdd_init_tx_rx_histogram(hdd_context_t *pHddCtx);
 void wlan_hdd_deinit_tx_rx_histogram(hdd_context_t *pHddCtx);
@@ -2590,4 +2589,8 @@ void hdd_svc_fw_shutdown_ind(struct device *dev);
 void wlan_hdd_stop_enter_lowpower(hdd_context_t *hdd_ctx);
 void wlan_hdd_init_chan_info(hdd_context_t *hdd_ctx);
 void wlan_hdd_deinit_chan_info(hdd_context_t *hdd_ctx);
+
+void hdd_chip_pwr_save_fail_detected_cb(void *hddctx,
+				struct chip_pwr_save_fail_detected_params
+				*data);
 #endif    // end #if !defined( WLAN_HDD_MAIN_H )

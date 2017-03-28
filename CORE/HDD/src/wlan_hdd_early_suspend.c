@@ -1985,6 +1985,30 @@ void hdd_svc_fw_shutdown_ind(struct device *dev)
 					      NULL, 0) : 0;
 }
 
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+/**
+* hdd_wlan_ssr_shutdown_event() - Send ssr shutdown status
+*
+* This function sends ssr shutdown status diag event
+*
+* Return: - Void.
+*/
+static void hdd_wlan_ssr_shutdown_event(void)
+{
+	WLAN_VOS_DIAG_EVENT_DEF(ssr_shutdown,
+					struct host_event_wlan_ssr_shutdown);
+	vos_mem_zero(&ssr_shutdown, sizeof(ssr_shutdown));
+	ssr_shutdown.status = SSR_SUB_SYSTEM_SHUTDOWN;
+	WLAN_VOS_DIAG_EVENT_REPORT(&ssr_shutdown,
+					EVENT_WLAN_SSR_SHUTDOWN_SUBSYSTEM);
+}
+#else
+static inline void hdd_wlan_ssr_shutdown_event(void)
+{
+
+};
+#endif
+
 /* the HDD interface to WLAN driver shutdown,
  * the primary shutdown function in SSR
  */
@@ -2176,6 +2200,7 @@ VOS_STATUS hdd_wlan_shutdown(void)
    wlan_hdd_send_status_pkg(NULL, NULL, 0, 0);
 #endif
 
+   hdd_wlan_ssr_shutdown_event();
    hddLog(VOS_TRACE_LEVEL_FATAL, "%s: WLAN driver shutdown complete"
                                    ,__func__);
    return VOS_STATUS_SUCCESS;
@@ -2199,9 +2224,10 @@ static void hdd_ssr_restart_sap(hdd_context_t *hdd_ctx)
 	while (NULL != adapter_node && VOS_STATUS_SUCCESS == status) {
 		adapter = adapter_node->pAdapter;
 		if (adapter && adapter->device_mode == WLAN_HDD_SOFTAP) {
-			hddLog(VOS_TRACE_LEVEL_INFO, FL("in sap mode %p"),
-				adapter);
-			wlan_hdd_start_sap(adapter, true);
+			if (test_bit(SOFTAP_INIT_DONE, &adapter->event_flags)) {
+				hddLog(VOS_TRACE_LEVEL_INFO, FL("Restart prev SAP session"));
+				wlan_hdd_start_sap(adapter, true);
+			}
 		}
 		status = hdd_get_next_adapter ( hdd_ctx, adapter_node, &next );
 		adapter_node = next;
@@ -2209,6 +2235,29 @@ static void hdd_ssr_restart_sap(hdd_context_t *hdd_ctx)
 
 	EXIT();
 }
+
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
+/**
+ * hdd_wlan_ssr_reinit_event - Send ssr reinit status
+ *
+ * This function sends ssr reinit status diag event
+ *
+ * Return: void.
+ */
+static void hdd_wlan_ssr_reinit_event(void)
+{
+	WLAN_VOS_DIAG_EVENT_DEF(ssr_reinit, struct host_event_wlan_ssr_reinit);
+	vos_mem_zero(&ssr_reinit, sizeof(ssr_reinit));
+	ssr_reinit.status = SSR_SUB_SYSTEM_REINIT;
+	WLAN_VOS_DIAG_EVENT_REPORT(&ssr_reinit,
+					EVENT_WLAN_SSR_REINIT_SUBSYSTEM);
+}
+#else
+static void hdd_wlan_ssr_reinit_event(void)
+{
+
+};
+#endif
 
 /* the HDD interface to WLAN driver re-init.
  * This is called to initialize/start WLAN driver after a shutdown.
@@ -2290,6 +2339,8 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: vos_preStart failed",__func__);
       goto err_vosclose;
    }
+
+   hdd_set_dfs_regdomain(pHddCtx,true);
 
    vosStatus = hdd_set_sme_chan_list(pHddCtx);
    if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
@@ -2449,6 +2500,10 @@ VOS_STATUS hdd_wlan_re_init(void *hif_sc)
                              pHddCtx->target_hw_version,
                              pHddCtx->target_hw_name);
 #endif
+   /* set chip power save failure detected callback */
+   sme_set_chip_pwr_save_fail_cb(pHddCtx->hHal,
+                                 hdd_chip_pwr_save_fail_detected_cb);
+
    ol_pktlog_init(hif_sc);
    goto success;
 
@@ -2502,6 +2557,7 @@ err_re_init:
    hdd_wlan_wakelock_destroy();
    return -EPERM;
 success:
+   hdd_wlan_ssr_reinit_event();
    if (pHddCtx->cfg_ini->sap_internal_restart)
        hdd_ssr_restart_sap(pHddCtx);
    pHddCtx->isLogpInProgress = FALSE;

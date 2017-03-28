@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -670,6 +670,7 @@ VOS_STATUS vos_watchdog_open
   vos_mem_zero(pWdContext, sizeof(VosWatchdogContext));
   pWdContext->pVContext = pVosContext;
   gpVosWatchdogContext = pWdContext;
+  pWdContext->thread_stuck_timer.state = VOS_TIMER_STATE_UNUSED;
 
   //Initialize the helper events and event queues
   init_completion(&pWdContext->WdStartEvent);
@@ -1109,7 +1110,7 @@ VosWDThread
   v_BOOL_t shutdown              = VOS_FALSE;
   int count                      = 0;
   VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
-  set_user_nice(current, -3);
+  set_user_nice(current, -4);
 
   if (Arg == NULL)
   {
@@ -1252,7 +1253,10 @@ VosWDThread
     } // while message loop processing
   } // while shutdown
 
-  vos_timer_destroy(&pWdContext->thread_stuck_timer);
+  /* destroy the timer only if intialized */
+  if (pWdContext->thread_stuck_timer.state != VOS_TIMER_STATE_UNUSED) {
+    vos_timer_destroy(&pWdContext->thread_stuck_timer);
+  }
   // If we get here the Watchdog thread must exit
   VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
       "%s: Watchdog Thread exiting !!!!", __func__);
