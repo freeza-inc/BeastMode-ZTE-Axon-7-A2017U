@@ -102,6 +102,7 @@
 #define DEVICE_IFACE_OPENED    (5)
 #define TDLS_INIT_DONE         (6)
 #define ACS_PENDING            (7)
+#define SOFTAP_INIT_DONE       (8)
 
 /* HDD global event flags */
 #define ACS_IN_PROGRESS        (0)
@@ -989,8 +990,6 @@ struct hdd_rate_info {
  * @rx_bytes: bytes received from this station
  * @rx_retries: cumulative retry counts
  * @tx_failed: number of failed transmissions
- * @last_tx_rate: last used tx bitrate (kbps)
- * @last_rx_rate: last used rx bitrate (kbps)
  * @rssi: The signal strength (dbm)
  * @tx_rate: last used tx rate info
  * @rx_rate: last used rx rate info
@@ -1004,8 +1003,6 @@ struct hdd_fw_txrx_stats {
 	uint64_t rx_bytes;
 	uint32_t tx_retries;
 	uint32_t tx_failed;
-	uint32_t last_tx_rate;
-	uint32_t last_rx_rate;
 	int8_t rssi;
 	struct hdd_rate_info tx_rate;
 	struct hdd_rate_info rx_rate;
@@ -2476,7 +2473,8 @@ void hdd_connect_result(struct net_device *dev, const u8 *bssid,
 			tCsrRoamInfo *roam_info, const u8 *req_ie,
 			size_t req_ie_len, const u8 * resp_ie,
 			size_t resp_ie_len, u16 status, gfp_t gfp,
-			bool connect_timeout);
+			bool connect_timeout,
+			tSirResultCodes timeout_reason);
 
 int wlan_hdd_init_tx_rx_histogram(hdd_context_t *pHddCtx);
 void wlan_hdd_deinit_tx_rx_histogram(hdd_context_t *pHddCtx);

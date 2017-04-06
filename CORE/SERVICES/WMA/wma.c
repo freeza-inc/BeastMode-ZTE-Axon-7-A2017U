@@ -7573,6 +7573,8 @@ static int wma_unified_dfs_radar_rx_event_handler(void *handle,
 	WMI_DFS_RADAR_EVENTID_param_tlvs *param_tlvs;
 	wmi_dfs_radar_event_fixed_param *radar_event;
 
+	adf_os_atomic_dec(&wma->dfs_wmi_event_pending);
+
 	ic = wma->dfs_ic;
 	if (NULL == ic) {
 		WMA_LOGE("%s: dfs_ic is  NULL ", __func__);
@@ -8000,13 +8002,14 @@ static int wma_chip_power_save_failure_detected_handler(void *handle,
 	WMI_PDEV_CHIP_POWER_SAVE_FAILURE_DETECTED_EVENTID_param_tlvs *param_buf;
 	wmi_chip_power_save_failure_detected_fixed_param  *event;
 	struct chip_pwr_save_fail_detected_params  pwr_save_fail_params;
-	tpAniSirGlobal mac = (tpAniSirGlobal)vos_get_context(
-					VOS_MODULE_ID_PE, wma->vos_context);
+	tpAniSirGlobal mac;
 
 	if (NULL == wma) {
 		WMA_LOGE("%s: wma_handle is NULL", __func__);
 		return VOS_STATUS_E_INVAL;
 	}
+	mac = (tpAniSirGlobal)vos_get_context(
+					VOS_MODULE_ID_PE, wma->vos_context);
 	if (!mac) {
 		WMA_LOGE("%s: Invalid mac context", __func__);
 		return VOS_STATUS_E_INVAL;
@@ -9025,6 +9028,8 @@ VOS_STATUS WDA_open(v_VOID_t *vos_context, v_VOID_t *os_ctx,
 	adf_os_spinlock_init(&wma_handle->roam_synch_lock);
 #endif
 	adf_os_atomic_init(&wma_handle->is_wow_bus_suspended);
+	adf_os_atomic_init(&wma_handle->dfs_wmi_event_pending);
+	adf_os_atomic_init(&wma_handle->dfs_wmi_event_dropped);
 
 	/* Register vdev start response event handler */
 	wmi_unified_register_event_handler(wma_handle->wmi_handle,
@@ -10789,18 +10794,6 @@ VOS_STATUS wma_get_buf_start_scan_cmd(tp_wma_handle wma_handle,
 		WMI_CHAR_ARRAY_TO_MAC_ADDR(scan_req->mac_addr_mask,
 						&cmd->mac_mask);
 	}
-	if (scan_req->ie_whitelist)
-		cmd->scan_ctrl_flags |=
-				WMI_SCAN_ENABLE_IE_WHTELIST_IN_PROBE_REQ;
-
-	WMA_LOGI("scan_ctrl_flags = %x", cmd->scan_ctrl_flags);
-
-	if (scan_req->ie_whitelist) {
-		for (i = 0; i < PROBE_REQ_BITMAP_LEN; i++)
-			cmd->ie_bitmap[i] = scan_req->probe_req_ie_bitmap[i];
-	}
-
-	cmd->num_vendor_oui = scan_req->num_vendor_oui;
 
 	if (!scan_req->p2pScanType) {
 		WMA_LOGD("Normal Scan request");
@@ -10822,6 +10815,16 @@ VOS_STATUS wma_get_buf_start_scan_cmd(tp_wma_handle wma_handle,
 
 		cmd->scan_ctrl_flags |= WMI_SCAN_ADD_TPC_IE_IN_PROBE_REQ;
 		cmd->scan_ctrl_flags |= WMI_SCAN_FILTER_PROBE_REQ;
+
+		if (scan_req->ie_whitelist) {
+			cmd->scan_ctrl_flags |=
+				WMI_SCAN_ENABLE_IE_WHTELIST_IN_PROBE_REQ;
+			for (i = 0; i < PROBE_REQ_BITMAP_LEN; i++)
+				cmd->ie_bitmap[i] =
+					scan_req->probe_req_ie_bitmap[i];
+		}
+
+		cmd->num_vendor_oui = scan_req->num_vendor_oui;
 
 		/*
 		 * Decide burst_duration and dwell_time_active based on
@@ -21219,24 +21222,32 @@ static void wma_enable_sta_ps_mode(tp_wma_handle wma, tpEnablePsParams ps_req)
 	}
 	ps_req->status = VOS_STATUS_SUCCESS;
 	iface->dtimPeriod = ps_req->bcnDtimPeriod;
+	iface->in_bmps = true;
 resp:
 	wma_send_msg(wma, WDA_ENTER_BMPS_RSP, ps_req, 0);
 }
 
 static void wma_disable_sta_ps_mode(tp_wma_handle wma, tpDisablePsParams ps_req)
 {
-        int32_t ret;
-        uint32_t vdev_id = ps_req->sessionid;
+	int32_t ret;
+	uint32_t vdev_id = ps_req->sessionid;
+	struct wma_txrx_node *iface = &wma->interfaces[vdev_id];
 
-        WMA_LOGD("Disable Sta Mode Ps vdevId %d", vdev_id);
+	if (!iface) {
+		WMA_LOGE("Invalid vdev id not attched to any iface %d",
+			vdev_id);
+		ps_req->status = VOS_STATUS_E_FAILURE;
+		goto resp;
+	}
 
-        /* Disable Sta Mode Power save */
-        ret = wmi_unified_set_sta_ps(wma->wmi_handle, vdev_id, false);
-        if(ret) {
-                WMA_LOGE("Disable Sta Mode Ps Failed vdevId %d", vdev_id);
-                ps_req->status = VOS_STATUS_E_FAILURE;
-                goto resp;
-        }
+	WMA_LOGD("Disable Sta Mode Ps vdevId %d", vdev_id);
+	/* Disable Sta Mode Power save */
+	ret = wmi_unified_set_sta_ps(wma->wmi_handle, vdev_id, false);
+	if(ret) {
+	        WMA_LOGE("Disable Sta Mode Ps Failed vdevId %d", vdev_id);
+	        ps_req->status = VOS_STATUS_E_FAILURE;
+	        goto resp;
+	}
 
 	/* Disable UAPSD incase if additional Req came */
 	if (eSIR_ADDON_DISABLE_UAPSD == ps_req->psSetting) {
@@ -21253,6 +21264,7 @@ static void wma_disable_sta_ps_mode(tp_wma_handle wma, tpDisablePsParams ps_req)
 	}
 
         ps_req->status = VOS_STATUS_SUCCESS;
+	iface->in_bmps = false;
 resp:
         wma_send_msg(wma, WDA_EXIT_BMPS_RSP, ps_req, 0);
 }
@@ -24253,9 +24265,11 @@ int wma_enable_wow_in_fw(WMA_HANDLE handle, int runtime_pm)
 			if (pMac->sme.enableSelfRecovery) {
 				vos_trigger_recovery(false);
 			} else {
+				vos_force_fw_dump();
 				VOS_BUG(0);
 			}
 #else
+			vos_force_fw_dump();
 			VOS_BUG(0);
 #endif
 		} else {
@@ -25031,9 +25045,15 @@ static VOS_STATUS wma_feed_wow_config_to_fw(tp_wma_handle wma,
 #endif
 
         wma_add_wow_wakeup_event(wma, WOW_OEM_RESPONSE_EVENT, TRUE);
-
-        wma_add_wow_wakeup_event(wma, WOW_CHIP_POWER_FAILURE_DETECT_EVENT,
-				 TRUE);
+	/*
+	 * Configure WOW for WOW_CHIP_POWER_FAILURE_DETECT_EVENT
+	 * We will only check vdev 0 to configure WOW wakeup.
+	 */
+	if (wma->interfaces[0].in_bmps == true ||
+	    wma->interfaces[0].in_imps == true)
+		wma_add_wow_wakeup_event(wma,
+					 WOW_CHIP_POWER_FAILURE_DETECT_EVENT,
+					 TRUE);
 
 	/* Enable wow wakeup events in FW */
 	ret = wma_send_wakeup_mask(wma, TRUE);
@@ -37794,7 +37814,8 @@ VOS_STATUS WDA_SetIdlePsConfig(void *wda_handle, tANI_U32 idle_ps)
 	tp_wma_handle wma = (tp_wma_handle)wda_handle;
 
 	WMA_LOGD("WMA Set Idle Ps Config [1:set 0:clear] val %d", idle_ps);
-
+	/* only use vdev 0 for imps tracking */
+	wma->interfaces[0].in_imps = idle_ps;
 	/* Set Idle Mode Power Save Config */
 	ret = wmi_unified_pdev_set_param(wma->wmi_handle,
 			WMI_PDEV_PARAM_IDLE_PS_CONFIG, idle_ps);

@@ -420,6 +420,7 @@ wlan_hdd_txrx_stypes[NUM_NL80211_IFTYPES] = {
     [NL80211_IFTYPE_STATION] = {
         .tx = 0xffff,
         .rx = BIT(SIR_MAC_MGMT_ACTION) |
+            BIT(SIR_MAC_MGMT_TIME_ADVERT) |
             BIT(SIR_MAC_MGMT_PROBE_REQ),
     },
     [NL80211_IFTYPE_AP] = {
@@ -2136,10 +2137,6 @@ __wlan_hdd_cfg80211_set_ext_roam_params(struct wiphy *wiphy,
 				if (i == count) {
 					hddLog(LOGW, FL("Ignoring excess Blacklist BSSID"));
 					break;
-				}
-				if (curr_attr == NULL) {
-					hddLog(LOGW, FL("Blacklist BSSID, curr_attr is null"));
-					continue;
 				}
 				if (nla_parse(tb2,
 					QCA_WLAN_VENDOR_ATTR_ROAMING_PARAM_MAX,
@@ -5480,9 +5477,16 @@ static bool put_wifi_iface_stats(tpSirWifiIfaceStat pWifiIfaceStat,
         nla_put_u32(vendor_event,
                     QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_LEAKY_AP_GUARD_TIME,
                     pWifiIfaceStat->rx_leak_window) ||
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+        nla_put_u64_64bit(vendor_event,
+                    QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_AVERAGE_TSF_OFFSET,
+                    average_tsf_offset,
+                   QCA_WLAN_VENDOR_ATTR_LL_STATS_PAD) ||
+#else
         nla_put_u64(vendor_event,
                     QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_AVERAGE_TSF_OFFSET,
                     average_tsf_offset) ||
+#endif
         nla_put_u32(vendor_event,
                     QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_RTS_SUCC_CNT,
                     pWifiIfaceStat->rts_succ_cnt) ||
@@ -8933,6 +8937,10 @@ static int wlan_hdd_cfg80211_start_acs(hdd_adapter_t *adapter)
 	int status;
 
 	sap_config = &adapter->sessionCtx.ap.sapConfig;
+
+	if (test_bit(SOFTAP_BSS_STARTED, &adapter->event_flags))
+		sap_config->backup_channel = sap_config->channel;
+
 	if (hdd_ctx->acs_policy.acs_channel)
 		sap_config->channel = hdd_ctx->acs_policy.acs_channel;
 	else
@@ -8980,6 +8988,98 @@ static int wlan_hdd_cfg80211_start_acs(hdd_adapter_t *adapter)
 	set_bit(ACS_IN_PROGRESS, &hdd_ctx->g_event_flags);
 
 	return 0;
+}
+
+/**
+ * wlan_hdd_cfg80211_relaunch_acs() - Relaunch ACS for SAP
+ * @adapter: pointer to SAP adapter structure
+ *
+ * This function relaunches ACS.
+ *
+ * Return: Result status of ACS relaunch
+ */
+
+static int wlan_hdd_cfg80211_relaunch_acs(hdd_adapter_t *adapter)
+{
+	uint8_t channel_list[MAX_CHANNEL] = {0};
+	uint8_t number_of_channels = 0;
+	hdd_context_t *hdd_ctx = (hdd_context_t *)adapter->pHddCtx;
+	tsap_Config_t *sap_config;
+	int status;
+	uint8_t cur_band, i;
+	uint8_t band_start_channel;
+	uint8_t band_end_channel;
+	bool ht_enabled = false, vht_enabled = false;
+
+	if (!test_bit(SOFTAP_BSS_STARTED, &adapter->event_flags)) {
+		hddLog(LOGE, FL("Softap is not started"));
+		return -EINVAL;
+	}
+
+	cur_band = vos_chan_to_band((WLAN_HDD_GET_AP_CTX_PTR(
+				   adapter))->operatingChannel);
+	sap_config = &adapter->sessionCtx.ap.sapConfig;
+	vos_mem_zero(&sap_config->acs_cfg, sizeof(struct sap_acs_cfg));
+
+	if (VOS_BAND_2GHZ == cur_band) {
+		band_start_channel = RF_CHAN_1;
+		band_end_channel = RF_CHAN_14;
+	} else {
+		band_start_channel = RF_CHAN_36;
+		band_end_channel = RF_CHAN_165;
+	}
+
+	for (i = band_start_channel; i <= band_end_channel; i++) {
+		if (NV_CHANNEL_ENABLE ==
+			vos_nv_getChannelEnabledState(
+			    rfChannels[i].channelNum)) {
+			channel_list[number_of_channels++] =
+			    rfChannels[i].channelNum;
+			hddLog(LOG1,
+			       FL("Config acs channel[%d]"),
+			       rfChannels[i].channelNum);
+		}
+	}
+
+	if (sap_config->SapHw_mode &
+		(eCSR_DOT11_MODE_11n |
+		 eCSR_DOT11_MODE_11n_ONLY |
+		 eCSR_DOT11_MODE_11ac))
+		ht_enabled = true;
+
+	if (sap_config->SapHw_mode &
+		(eCSR_DOT11_MODE_11ac |
+		 eCSR_DOT11_MODE_11ac_ONLY))
+		vht_enabled = true;
+
+	sap_config->acs_cfg.ch_width = sap_config->ch_width_orig;
+
+	hddLog(LOG1,
+	       FL("ht_enabled=%d vht_enabled=%d ch_width=%d"),
+	       ht_enabled,
+	       vht_enabled,
+	       sap_config->acs_cfg.ch_width);
+
+	wlan_hdd_set_acs_ch_range(sap_config, ht_enabled, vht_enabled);
+
+	sap_config->acsBandSwitchThreshold =
+	    hdd_ctx->cfg_ini->acsBandSwitchThreshold;
+
+	if (hdd_ctx->cfg_ini->auto_channel_select_weight)
+		sap_config->auto_channel_select_weight =
+		    hdd_ctx->cfg_ini->auto_channel_select_weight;
+
+	sap_config->acs_cfg.acs_mode = true;
+	if (test_bit(ACS_IN_PROGRESS, &hdd_ctx->g_event_flags)) {
+		hddLog(LOG1, FL("ACS Pending for wlan"));
+		status = -EINVAL;
+	} else {
+		hddLog(LOG1, FL("Relaunch ACS"));
+		wlan_hdd_cfg80211_start_acs(adapter);
+		status = 0;
+	}
+
+	return status;
 }
 
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
@@ -9069,10 +9169,23 @@ static int __wlan_hdd_cfg80211_do_acs(struct wiphy *wiphy,
 	if (0 != status)
 		return status;
 
-	if (hdd_cfg_is_sub20_channel_width_enabled(hdd_ctx)) {
-		hddLog(LOGE, FL("ACS not support in sub20 enable"));
+	if (hdd_cfg_is_static_sub20_channel_width_enabled(hdd_ctx)) {
+		hddLog(LOGE, FL("ACS not support if static sub20 enable"));
 		status = -EINVAL;
 		goto out;
+	}
+
+	if (test_bit(SOFTAP_BSS_STARTED, &adapter->event_flags)) {
+		if (WLANSAP_get_sub20_channel_width(
+			    WLAN_HDD_GET_SAP_CTX_PTR(adapter))
+			== SUB20_MODE_NONE) {
+			hddLog(LOGE, FL("Bss started, relaunch ACS"));
+			status = wlan_hdd_cfg80211_relaunch_acs(adapter);
+		} else {
+			hddLog(LOGE, FL("ACS not support in sub20 enable"));
+			status = -EINVAL;
+		}
+		return status;
 	}
 
 	sap_config = &adapter->sessionCtx.ap.sapConfig;
@@ -9770,7 +9883,6 @@ static int __wlan_hdd_cfg80211_wifi_configuration_set(struct wiphy *wiphy,
 					(int)WMI_PDEV_PARAM_NON_AGG_SW_RETRY_TH,
 					retry, PDEV_CMD);
 		}
-
 	}
 
 	if (tb[QCA_WLAN_VENDOR_ATTR_CONFIG_AGG_RETRY]) {
@@ -12565,6 +12677,7 @@ __wlan_hdd_cfg80211_sap_configuration_set(struct wiphy *wiphy,
 		hddLog(LOGE, FL("invalid attr"));
 		return -EINVAL;
 	}
+
 	if (tb[QCA_WLAN_VENDOR_ATTR_SAP_CONFIG_CHANNEL])
 		config_channel =
 			nla_get_u8(tb[QCA_WLAN_VENDOR_ATTR_SAP_CONFIG_CHANNEL]);
@@ -12676,7 +12789,12 @@ static int wlan_hdd_cfg80211_sap_configuration_set(struct wiphy *wiphy,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_STBC
 #define REMOTE_CH_WIDTH\
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_CH_WIDTH
-
+#define REMOTE_SGI_ENABLE\
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_SGI_ENABLE
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+#define REMOTE_PAD\
+       QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_PAD
+#endif
 /**
  * hdd_get_peer_txrx_rate_cb() - get station's txrx rate callback
  * @peer_info: pointer of peer information
@@ -12685,11 +12803,11 @@ static int wlan_hdd_cfg80211_sap_configuration_set(struct wiphy *wiphy,
  * This function fill txrx rate information to aStaInfo[staid] of hostapd
  * adapter
  */
-static void hdd_get_peer_txrx_rate_cb(struct sir_peer_info_resp *peer_info,
+static void hdd_get_peer_txrx_rate_cb(struct sir_peer_info_ext_resp *peer_info,
 		void *context)
 {
 	struct statsContext *get_txrx_rate_context;
-	struct sir_peer_info *txrx_rate = NULL;
+	struct sir_peer_info_ext *txrx_rate = NULL;
 	hdd_adapter_t *adapter;
 	uint8_t staid;
 
@@ -12724,22 +12842,32 @@ static void hdd_get_peer_txrx_rate_cb(struct sir_peer_info_resp *peer_info,
 		return;
 	}
 
-	if (peer_info->count) {
-		adapter = get_txrx_rate_context->pAdapter;
-		txrx_rate = peer_info->info;
-		if (VOS_STATUS_SUCCESS != hdd_softap_GetStaId(adapter,
-					(v_MACADDR_t *)txrx_rate->peer_macaddr,
-					&staid)) {
-			spin_unlock(&hdd_context_lock);
-			hddLog(VOS_TRACE_LEVEL_ERROR,
-					"%s: Station MAC address does not matching",
-					__func__);
-			return;
-		}
-
-		adapter->aStaInfo[staid].tx_rate = txrx_rate->tx_rate;
-		adapter->aStaInfo[staid].rx_rate = txrx_rate->rx_rate;
+	if (!peer_info->count) {
+		spin_unlock(&hdd_context_lock);
+		hddLog(VOS_TRACE_LEVEL_ERROR,
+				FL("Fail to get remote peer info"));
+		return;
 	}
+
+	adapter = get_txrx_rate_context->pAdapter;
+	txrx_rate = peer_info->info;
+	if (VOS_STATUS_SUCCESS != hdd_softap_GetStaId(adapter,
+				(v_MACADDR_t *)txrx_rate->peer_macaddr,
+				&staid)) {
+		spin_unlock(&hdd_context_lock);
+		hddLog(VOS_TRACE_LEVEL_ERROR,
+				"%s: Station MAC address does not matching",
+				__func__);
+		return;
+	}
+
+	adapter->aStaInfo[staid].tx_rate = txrx_rate->tx_rate;
+	adapter->aStaInfo[staid].rx_rate = txrx_rate->rx_rate;
+	hddLog(VOS_TRACE_LEVEL_INFO, "%s txrate %x rxrate %x\n",
+			__func__,
+			adapter->aStaInfo[staid].tx_rate,
+			adapter->aStaInfo[staid].rx_rate);
+
 	get_txrx_rate_context->magic = 0;
 
 	/* notify the caller */
@@ -12761,7 +12889,7 @@ static void hdd_get_peer_txrx_rate_cb(struct sir_peer_info_resp *peer_info,
  * @adapter: hostapd interface
  * @macaddress: mac address of requested peer
  *
- * This function call sme_get_peer_info to get txrx rate
+ * This function call sme_get_peer_info_ext to get txrx rate
  *
  * Return: 0 on success, otherwise error value
  */
@@ -12771,7 +12899,7 @@ static int wlan_hdd_get_txrx_rate(hdd_adapter_t *adapter,
 	eHalStatus hstatus;
 	int ret;
 	struct statsContext context;
-	struct sir_peer_info_req txrx_rate_req;
+	struct sir_peer_info_ext_req txrx_rate_req;
 
 	if (NULL == adapter) {
 		hddLog(VOS_TRACE_LEVEL_ERROR, "%s: pAdapter is NULL",
@@ -12786,8 +12914,9 @@ static int wlan_hdd_get_txrx_rate(hdd_adapter_t *adapter,
 	vos_mem_copy(&(txrx_rate_req.peer_macaddr), &macaddress,
 				VOS_MAC_ADDR_SIZE);
 	txrx_rate_req.sessionid = adapter->sessionId;
-	hstatus = sme_get_peer_info(WLAN_HDD_GET_HAL_CTX(adapter),
-				txrx_rate_req,
+	txrx_rate_req.reset_after_request = 0;
+	hstatus = sme_get_peer_info_ext(WLAN_HDD_GET_HAL_CTX(adapter),
+				&txrx_rate_req,
 				&context,
 				hdd_get_peer_txrx_rate_cb);
 	if (eHAL_STATUS_SUCCESS != hstatus) {
@@ -12884,7 +13013,8 @@ static int hdd_get_station_remote(hdd_context_t *hdd_ctx,
 		(sizeof(stainfo->isQosEnabled) + NLA_HDRLEN) +
 		(sizeof(stainfo->mode) + NLA_HDRLEN);
 
-	if (wlan_hdd_get_txrx_rate(adapter, mac_addr)) {
+	if (!hdd_ctx->cfg_ini->sap_get_peer_info ||
+			wlan_hdd_get_txrx_rate(adapter, mac_addr)) {
 		hddLog(LOGE, FL("fail to get tx/rx rate"));
 		txrx_rate = false;
 	} else {
@@ -12897,7 +13027,8 @@ static int hdd_get_station_remote(hdd_context_t *hdd_ctx,
 		nl_buf_len += (sizeof(stainfo->ampdu) + NLA_HDRLEN) +
 			(sizeof(stainfo->tx_stbc) + NLA_HDRLEN) +
 			(sizeof(stainfo->rx_stbc) + NLA_HDRLEN) +
-			(sizeof(stainfo->ch_width) + NLA_HDRLEN);
+			(sizeof(stainfo->ch_width) + NLA_HDRLEN) +
+			(sizeof(stainfo->sgi_enable) + NLA_HDRLEN);
 
 	hddLog(VOS_TRACE_LEVEL_INFO, FL("buflen %d hdrlen %d"),
 			nl_buf_len, NLMSG_HDRLEN);
@@ -12925,16 +13056,27 @@ static int hdd_get_station_remote(hdd_context_t *hdd_ctx,
 				stainfo->ampdu, stainfo->tx_stbc,
 				stainfo->rx_stbc);
 		hddLog(VOS_TRACE_LEVEL_INFO,
-				FL("wmm %d chwidth %d"),
+				FL("wmm %d chwidth %d sgi %d"),
 				stainfo->isQosEnabled,
-				stainfo->ch_width);
+				stainfo->ch_width,
+				stainfo->sgi_enable);
 	}
 
 	if (nla_put_u32(skb, REMOTE_MAX_PHY_RATE, stainfo->max_phy_rate) ||
 	    nla_put_u32(skb, REMOTE_TX_PACKETS, stainfo->tx_packets) ||
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+           nla_put_u64_64bit(skb, REMOTE_TX_BYTES, stainfo->tx_bytes,
+                                                       REMOTE_PAD) ||
+#else
 	    nla_put_u64(skb, REMOTE_TX_BYTES, stainfo->tx_bytes) ||
+#endif
 	    nla_put_u32(skb, REMOTE_RX_PACKETS, stainfo->rx_packets) ||
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+           nla_put_u64_64bit(skb, REMOTE_RX_BYTES, stainfo->rx_bytes,
+                                                       REMOTE_PAD) ||
+#else
 	    nla_put_u64(skb, REMOTE_RX_BYTES, stainfo->rx_bytes) ||
+#endif
 	    nla_put_u8(skb, REMOTE_WMM, stainfo->isQosEnabled) ||
 	    nla_put_u8(skb, REMOTE_SUPPORTED_MODE, stainfo->mode)) {
 		hddLog(LOGE, FL("put fail"));
@@ -12957,7 +13099,8 @@ static int hdd_get_station_remote(hdd_context_t *hdd_ctx,
 		if (nla_put_u8(skb, REMOTE_AMPDU, stainfo->ampdu) ||
 		    nla_put_u8(skb, REMOTE_TX_STBC, stainfo->tx_stbc) ||
 		    nla_put_u8(skb, REMOTE_RX_STBC, stainfo->rx_stbc) ||
-		    nla_put_u8(skb, REMOTE_CH_WIDTH, stainfo->ch_width)) {
+		    nla_put_u8(skb, REMOTE_CH_WIDTH, stainfo->ch_width) ||
+		    nla_put_u8(skb, REMOTE_SGI_ENABLE, stainfo->sgi_enable)) {
 			hddLog(LOGE, FL("put fail"));
 			goto fail;
 		}
@@ -13110,7 +13253,10 @@ hdd_cfg80211_get_station_cmd(struct wiphy *wiphy,
 #undef REMOTE_TX_STBC
 #undef REMOTE_RX_STBC
 #undef REMOTE_CH_WIDTH
-
+#undef REMOTE_SGI_ENABLE
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+#undef REMOTE_PAD
+#endif
 static const struct
 nla_policy qca_wlan_vendor_attr[QCA_WLAN_VENDOR_ATTR_MAX+1] = {
 	[QCA_WLAN_VENDOR_ATTR_ROAMING_POLICY] = {.type = NLA_U32},
@@ -16499,6 +16645,8 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
     if (pHddCtx->cfg_ini->enable_dynamic_sta_chainmask)
        hdd_decide_dynamic_chain_mask(pHddCtx, HDD_ANTENNA_MODE_2X2);
 
+    set_bit(SOFTAP_INIT_DONE, &pHostapdAdapter->event_flags);
+
     vos_event_reset(&pHostapdState->vosEvent);
     status = WLANSAP_StartBss(
 #ifdef WLAN_FEATURE_MBSSID
@@ -16574,6 +16722,8 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
          }
     }
 #endif
+    /* Check and restart SAP if it is on unsafe channel */
+    hdd_unsafe_channel_restart_sap(pHddCtx);
 
     pHostapdState->bCommit = TRUE;
     EXIT();
@@ -16581,6 +16731,7 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
    return 0;
 
 error:
+    clear_bit(SOFTAP_INIT_DONE, &pHostapdAdapter->event_flags);
     if (pHostapdAdapter->sessionCtx.ap.sapConfig.acs_cfg.ch_list) {
         vos_mem_free(pHostapdAdapter->sessionCtx.ap.sapConfig.acs_cfg.ch_list);
         pHostapdAdapter->sessionCtx.ap.sapConfig.acs_cfg.ch_list = NULL;
@@ -16949,6 +17100,7 @@ static int __wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
 
     // Reset WNI_CFG_PROBE_RSP Flags
     wlan_hdd_reset_prob_rspies(pAdapter);
+    clear_bit(SOFTAP_INIT_DONE, &pAdapter->event_flags);
 
 #ifdef WLAN_FEATURE_P2P_DEBUG
     if((pAdapter->device_mode == WLAN_HDD_P2P_GO) &&
@@ -17088,6 +17240,7 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
     int            status;
     ENTER();
 
+    clear_bit(SOFTAP_INIT_DONE, &pAdapter->event_flags);
     MTRACE(vos_trace(VOS_MODULE_ID_HDD,
                      TRACE_CODE_HDD_CFG80211_START_AP, pAdapter->sessionId,
                      params->beacon_interval));
@@ -19885,7 +20038,17 @@ static eHalStatus hdd_cfg80211_scan_done_callback(tHalHandle halHandle,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
     if (!iface_down)
 #endif
+    {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0))
+        struct cfg80211_scan_info info = {
+                        .aborted = aborted,
+        };
+
+        cfg80211_scan_done(req, &info);
+#else
         cfg80211_scan_done(req, aborted);
+#endif
+    }
 
     complete(&pScanInfo->abortscan_event_var);
 
@@ -20151,7 +20314,17 @@ static void wlan_hdd_cfg80211_scan_block_cb(struct work_struct *work)
         hddLog(LOGE,
                 "%s:##In DFS Master mode. Scan aborted. Null result sent",
                  __func__);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0))
+       {
+            struct cfg80211_scan_info info = {
+                            .aborted = true,
+            };
+
+            cfg80211_scan_done(request, &info);
+       }
+#else
         cfg80211_scan_done(request, true);
+#endif
         adapter->request = NULL;
     }
 }
@@ -20689,7 +20862,9 @@ int __wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
     wlan_hdd_update_scan_rand_attrs((void *)&scanRequest, (void *)request,
                                     WLAN_HDD_HOST_SCAN);
 
-    if (!hdd_connIsConnected(station_ctx) &&
+    if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION &&
+        !is_p2p_scan &&
+        !hdd_connIsConnected(station_ctx) &&
         (pHddCtx->cfg_ini->probe_req_ie_whitelist)) {
         if (pHddCtx->no_of_probe_req_ouis != 0) {
             scanRequest.voui = (struct vendor_oui *)vos_mem_malloc(
@@ -23832,7 +24007,9 @@ static void hdd_fill_bw_mcs(struct station_info *sinfo,
 		bool vht)
 {
 	if (vht) {
+		sinfo->txrate.nss = nss;
 		sinfo->txrate.mcs = mcsidx;
+		sinfo->txrate.flags |= RATE_INFO_FLAGS_VHT_MCS;
 		if (rate_flags & eHAL_TX_RATE_VHT80)
 			sinfo->txrate.bw = RATE_INFO_BW_80;
 		else if (rate_flags & eHAL_TX_RATE_VHT40)
@@ -23867,7 +24044,9 @@ static void hdd_fill_bw_mcs(struct station_info *sinfo,
 		bool vht)
 {
 	if (vht) {
+		sinfo->txrate.nss = nss;
 		sinfo->txrate.mcs = mcsidx;
+		sinfo->txrate.flags |= RATE_INFO_FLAGS_VHT_MCS;
 		if (rate_flags & eHAL_TX_RATE_VHT80)
 			sinfo->txrate.flags |= RATE_INFO_FLAGS_80_MHZ_WIDTH;
 		else if (rate_flags & eHAL_TX_RATE_VHT40)
@@ -23933,9 +24112,15 @@ static void hdd_fill_sinfo_rate_info(struct station_info *sinfo,
 		sinfo->txrate.legacy = maxrate;
 	} else {
 		/* must be MCS */
-		sinfo->txrate.nss = nss;
-		hdd_fill_bw_mcs_vht(sinfo, rate_flags, mcsidx, nss);
-		hdd_fill_bw_mcs(sinfo, rate_flags, mcsidx, nss, FALSE);
+		if (rate_flags &
+				(eHAL_TX_RATE_VHT80 |
+				 eHAL_TX_RATE_VHT40 |
+				 eHAL_TX_RATE_VHT20))
+			hdd_fill_bw_mcs_vht(sinfo, rate_flags, mcsidx, nss);
+
+		if (rate_flags & (eHAL_TX_RATE_HT20 | eHAL_TX_RATE_HT40))
+			hdd_fill_bw_mcs(sinfo, rate_flags, mcsidx, nss, FALSE);
+
 		if (rate_flags & eHAL_TX_RATE_SGI) {
 			if (!(sinfo->txrate.flags & RATE_INFO_FLAGS_VHT_MCS))
 				sinfo->txrate.flags |= RATE_INFO_FLAGS_MCS;
@@ -24026,7 +24211,7 @@ static void hdd_fill_rate_info(struct station_info *sinfo,
 			cfg->reportMaxLinkSpeed);
 
 	/* convert to 100kbps expected in rate table */
-	myrate = stats->last_tx_rate/100;
+	myrate = stats->tx_rate.rate/100;
 	rate_flags = stainfo->rate_flags;
 	if (!(rate_flags & eHAL_TX_RATE_LEGACY)) {
 		nss = stainfo->nss;
@@ -28590,6 +28775,10 @@ wlan_hdd_cfg80211_extscan_get_capabilities_rsp(void *ctx,
 	QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_IE_LENGTH
 #define PARAM_IE_DATA \
 	QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_IE_DATA
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+#define PARAM_PAD \
+       QCA_WLAN_VENDOR_ATTR_EXTSCAN_PAD
+#endif
 
 /** hdd_extscan_nl_fill_bss() - extscan nl fill bss
  * @skb: socket buffer
@@ -28607,7 +28796,12 @@ static int hdd_extscan_nl_fill_bss(struct sk_buff *skb, tSirWifiScanResult *ap,
 	if (!nla_ap)
 		return -EINVAL;
 
-	if (nla_put_u64(skb, PARAM_TIME_STAMP, ap->ts) ||
+	if (
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+        nla_put_u64_64bit(skb, PARAM_TIME_STAMP, ap->ts, PARAM_PAD) ||
+#else
+	nla_put_u64(skb, PARAM_TIME_STAMP, ap->ts) ||
+#endif
 	    nla_put(skb, PARAM_SSID, sizeof(ap->ssid), ap->ssid) ||
 	    nla_put(skb, PARAM_BSSID, sizeof(ap->bssid), ap->bssid) ||
 	    nla_put_u32(skb, PARAM_CHANNEL, ap->channel) ||
@@ -28646,7 +28840,9 @@ static int hdd_extscan_nl_fill_bss(struct sk_buff *skb, tSirWifiScanResult *ap,
 #undef PARAM_CAPABILITY
 #undef PARAM_IE_LENGTH
 #undef PARAM_IE_DATA
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+#undef PARAM_PAD
+#endif
 
 /** wlan_hdd_cfg80211_extscan_cached_results_ind() - get cached results
  * @ctx: hdd global context
@@ -28971,9 +29167,17 @@ wlan_hdd_cfg80211_extscan_hotlist_match_ind(void *ctx,
 			if (!ap)
 				goto fail;
 
-			if (nla_put_u64(skb,
+			if (
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+                           nla_put_u64_64bit(skb,
+                               QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_TIME_STAMP,
+                               data->ap[i].ts,
+                               QCA_WLAN_VENDOR_ATTR_EXTSCAN_PAD) ||
+#else
+				nla_put_u64(skb,
 				QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_TIME_STAMP,
 				data->ap[i].ts) ||
+#endif
 			    nla_put(skb,
 				QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_SSID,
 				sizeof(data->ap[i].ssid),
@@ -29260,9 +29464,16 @@ wlan_hdd_cfg80211_extscan_full_scan_result_event(void *ctx,
 
 	if (nla_put_u32(skb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_REQUEST_ID,
 		pData->requestId) ||
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+           nla_put_u64_64bit(skb,
+               QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_TIME_STAMP,
+               pData->ap.ts,
+               QCA_WLAN_VENDOR_ATTR_EXTSCAN_PAD) ||
+#else
 	    nla_put_u64(skb,
 		QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_TIME_STAMP,
 		pData->ap.ts) ||
+#endif
 	    nla_put(skb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_SCAN_RESULT_SSID,
 		sizeof(pData->ap.ssid),
 		pData->ap.ssid) ||

@@ -133,6 +133,7 @@ extern int hdd_hostapd_stop (struct net_device *dev);
 #include "wlan_hdd_tsf.h"
 #include "tl_shim.h"
 #include "wlan_hdd_oemdata.h"
+#include "sirApi.h"
 
 #ifdef CNSS_GENL
 #include <net/cnss_nl.h>
@@ -7277,9 +7278,10 @@ static int hdd_driver_command(hdd_adapter_t *pAdapter,
                ret = -EFAULT;
                goto exit;
             }
-            priv_data.buf[numOfBytestoPrint] = '\0';
+            /* This overwrites the last space, which we already copied */
+            extra[numOfBytestoPrint - 1] = '\0';
             VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_MED,
-                      "%s", priv_data.buf);
+                      "%s", extra);
 
             if (length > numOfBytestoPrint)
             {
@@ -7293,7 +7295,7 @@ static int hdd_driver_command(hdd_adapter_t *pAdapter,
                     goto exit;
                 }
                 VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_MED,
-                          "%s", &priv_data.buf[numOfBytestoPrint]);
+                          "%s", &extra[numOfBytestoPrint]);
             }
 
             /* Free temporary buffer */
@@ -12013,6 +12015,99 @@ struct cfg80211_bss *hdd_cfg80211_get_bss(struct wiphy *wiphy,
 #endif
 
 #if defined CFG80211_CONNECT_BSS
+#if defined CFG80211_CONNECT_TIMEOUT_REASON_CODE || \
+	(LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0))
+/**
+ * hdd_convert_timeout_reason() - Convert to kernel specific enum
+ * @timeout_reason: reason for connect timeout
+ *
+ * This function is used to convert host timeout
+ * reason enum to kernel specific enum.
+ *
+ * Return: nl timeout enum
+ */
+static enum nl80211_timeout_reason hdd_convert_timeout_reason(
+	  tSirResultCodes timeout_reason)
+{
+	switch (timeout_reason) {
+	case eSIR_SME_JOIN_TIMEOUT_RESULT_CODE:
+		return NL80211_TIMEOUT_SCAN;
+	case eSIR_SME_AUTH_TIMEOUT_RESULT_CODE:
+		return NL80211_TIMEOUT_AUTH;
+	case eSIR_SME_ASSOC_TIMEOUT_RESULT_CODE:
+		return NL80211_TIMEOUT_ASSOC;
+	default:
+		return NL80211_TIMEOUT_UNSPECIFIED;
+	}
+}
+
+/**
+ * hdd_cfg80211_connect_timeout() - API to send connection timeout reason
+ * @dev: network device
+ * @bssid: bssid to which we want to associate
+ * @timeout_reason: reason for connect timeout
+ *
+ * This API is used to send connection timeout reason to supplicant
+ *
+ * Return: void
+ */
+static void hdd_cfg80211_connect_timeout(struct net_device *dev,
+					 const u8 *bssid,
+					 tSirResultCodes timeout_reason)
+{
+	enum nl80211_timeout_reason nl_timeout_reason;
+	nl_timeout_reason = hdd_convert_timeout_reason(timeout_reason);
+
+	cfg80211_connect_timeout(dev, bssid, NULL, 0, GFP_KERNEL,
+				 nl_timeout_reason);
+}
+
+/**
+ * __hdd_connect_bss() - API to send connection status to supplicant
+ * @dev: network device
+ * @bssid: bssid to which we want to associate
+ * @req_ie: Request Information Element
+ * @req_ie_len: len of the req IE
+ * @resp_ie: Response IE
+ * @resp_ie_len: len of ht response IE
+ * @status: status
+ * @gfp: Kernel Flag
+ * @timeout_reason: reason for connect timeout
+ *
+ * Return: void
+ */
+static void __hdd_connect_bss(struct net_device *dev, const u8 *bssid,
+			      struct cfg80211_bss *bss, const u8 *req_ie,
+			      size_t req_ie_len, const u8 *resp_ie,
+			      size_t resp_ie_len, int status, gfp_t gfp,
+			      tSirResultCodes timeout_reason)
+{
+	enum nl80211_timeout_reason nl_timeout_reason;
+	nl_timeout_reason = hdd_convert_timeout_reason(timeout_reason);
+
+	cfg80211_connect_bss(dev, bssid, bss, req_ie, req_ie_len,
+			     resp_ie, resp_ie_len, status, gfp,
+			     nl_timeout_reason);
+}
+#else
+#if defined CFG80211_CONNECT_TIMEOUT
+static void hdd_cfg80211_connect_timeout(struct net_device *dev,
+					 const u8 *bssid,
+					 tSirResultCodes timeout_reason)
+{
+	cfg80211_connect_timeout(dev, bssid, NULL, 0, GFP_KERNEL);
+}
+#endif
+static void __hdd_connect_bss(struct net_device *dev, const u8 *bssid,
+			      struct cfg80211_bss *bss, const u8 *req_ie,
+			      size_t req_ie_len, const u8 *resp_ie,
+			      size_t resp_ie_len, int status, gfp_t gfp,
+			      tSirResultCodes timeout_reason)
+{
+	cfg80211_connect_bss(dev, bssid, bss, req_ie, req_ie_len,
+			     resp_ie, resp_ie_len, status, gfp);
+}
+#endif
 /**
  * hdd_connect_bss() - API to send connection status to supplicant
  * @dev: network device
@@ -12024,6 +12119,7 @@ struct cfg80211_bss *hdd_cfg80211_get_bss(struct wiphy *wiphy,
  * @status: status
  * @gfp: Kernel Flag
  * @connect_timeout: If timed out waiting for Auth/Assoc/Probe resp
+ * @timeout_reason: reason for connect timeout
  *
  * The API is a wrapper to send connection status to supplicant
  *
@@ -12034,23 +12130,23 @@ static void hdd_connect_bss(struct net_device *dev, const u8 *bssid,
 			struct cfg80211_bss *bss, const u8 *req_ie,
 			size_t req_ie_len, const u8 *resp_ie,
 			size_t resp_ie_len, int status, gfp_t gfp,
-			bool connect_timeout)
+			bool connect_timeout, tSirResultCodes timeout_reason)
 {
 	if (connect_timeout)
-		cfg80211_connect_timeout(dev, bssid, NULL, 0, GFP_KERNEL);
+		hdd_cfg80211_connect_timeout(dev, bssid, timeout_reason);
 	else
-		cfg80211_connect_bss(dev, bssid, bss, req_ie, req_ie_len,
-			resp_ie, resp_ie_len, status, gfp);
+		__hdd_connect_bss(dev, bssid, bss, req_ie, req_ie_len,
+			resp_ie, resp_ie_len, status, gfp, timeout_reason);
 }
 #else
 static void hdd_connect_bss(struct net_device *dev, const u8 *bssid,
 			struct cfg80211_bss *bss, const u8 *req_ie,
 			size_t req_ie_len, const u8 *resp_ie,
 			size_t resp_ie_len, int status, gfp_t gfp,
-			bool connect_timeout)
+			bool connect_timeout, tSirResultCodes timeout_reason)
 {
 	cfg80211_connect_bss(dev, bssid, bss, req_ie, req_ie_len,
-		resp_ie, resp_ie_len, status, gfp);
+		resp_ie, resp_ie_len, status, gfp, timeout_reason);
 }
 #endif
 
@@ -12066,6 +12162,7 @@ static void hdd_connect_bss(struct net_device *dev, const u8 *bssid,
  * @status: status
  * @gfp: Kernel Flag
  * @connect_timeout: If timed out waiting for Auth/Assoc/Probe resp
+ * @timeout_reason: reason for connect timeout
  *
  * The API is a wrapper to send connection status to supplicant
  * and allow runtime suspend
@@ -12081,7 +12178,7 @@ void hdd_connect_result(struct net_device *dev,
 			size_t resp_ie_len,
 			u16 status,
 			gfp_t gfp,
-			bool connect_timeout)
+			bool connect_timeout, tSirResultCodes timeout_reason)
 {
 	hdd_adapter_t *padapter = (hdd_adapter_t *) netdev_priv(dev);
 	struct cfg80211_bss *bss = NULL;
@@ -12106,7 +12203,7 @@ void hdd_connect_result(struct net_device *dev,
 
 	hdd_connect_bss(dev, bssid, bss, req_ie,
 				req_ie_len, resp_ie, resp_ie_len,
-				status, gfp, connect_timeout);
+				status, gfp, connect_timeout, timeout_reason);
 	vos_runtime_pm_allow_suspend(padapter->runtime_context.connect);
 }
 #else
@@ -12119,7 +12216,7 @@ void hdd_connect_result(struct net_device *dev,
 			size_t resp_ie_len,
 			u16 status,
 			gfp_t gfp,
-			bool connect_timeout)
+			bool connect_timeout, tSirResultCodes timeout_reason)
 {
 	hdd_adapter_t *padapter = (hdd_adapter_t *) netdev_priv(dev);
 
@@ -12191,7 +12288,7 @@ VOS_STATUS hdd_start_all_adapters( hdd_context_t *pHddCtx )
                hdd_connect_result(pAdapter->dev, NULL, NULL,
                                        NULL, 0, NULL, 0,
                                        WLAN_STATUS_ASSOC_DENIED_UNSPEC,
-                                       GFP_KERNEL, false);
+                                       GFP_KERNEL, false, 0);
             }
 
 #ifdef QCA_LL_TX_FLOW_CT
@@ -13427,6 +13524,10 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
     */
    hdd_stop_all_adapters( pHddCtx );
 
+#ifdef QCA_PKT_PROTO_TRACE
+   if (VOS_FTM_MODE != hdd_get_conparam())
+       vos_pkt_proto_trace_close();
+#endif
 
    //Stop all the modules
    vosStatus = vos_stop( pVosContext );
@@ -16548,11 +16649,6 @@ static void hdd_driver_exit(void)
    vos_wait_for_work_thread_completion(__func__);
    hif_unregister_driver();
    vos_preClose( &pVosContext );
-
-#ifdef QCA_PKT_PROTO_TRACE
-   if (VOS_FTM_MODE != hdd_get_conparam())
-       vos_pkt_proto_trace_close();
-#endif /* QCA_PKT_PROTO_TRACE */
 
 #ifdef TIMER_MANAGER
    vos_timer_exit();

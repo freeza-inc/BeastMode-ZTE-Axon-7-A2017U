@@ -950,21 +950,6 @@ REG_TABLE_ENTRY g_registry_table[] =
                  CFG_IDLE_TIME_DEFAULT,
                  CFG_IDLE_TIME_MIN,
                  CFG_IDLE_TIME_MAX ),
-
-
-   REG_VARIABLE( CFG_NUM_STA_CHAN_COMBINED_CONC_NAME, WLAN_PARAM_Integer,
-                 hdd_config_t, nNumStaChanCombinedConc,
-                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                 CFG_NUM_STA_CHAN_COMBINED_CONC_DEFAULT,
-                 CFG_NUM_STA_CHAN_COMBINED_CONC_MIN,
-                 CFG_NUM_STA_CHAN_COMBINED_CONC_MAX ),
-
-   REG_VARIABLE( CFG_NUM_P2P_CHAN_COMBINED_CONC_NAME, WLAN_PARAM_Integer,
-                 hdd_config_t, nNumP2PChanCombinedConc,
-                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                 CFG_NUM_P2P_CHAN_COMBINED_CONC_DEFAULT,
-                 CFG_NUM_P2P_CHAN_COMBINED_CONC_MIN,
-                 CFG_NUM_P2P_CHAN_COMBINED_CONC_MAX ),
 #endif
 
    REG_VARIABLE( CFG_MAX_PS_POLL_NAME, WLAN_PARAM_Integer,
@@ -2021,13 +2006,6 @@ REG_TABLE_ENTRY g_registry_table[] =
                  CFG_BCN_EARLY_TERM_WAKE_DEFAULT,
                  CFG_BCN_EARLY_TERM_WAKE_MIN,
                  CFG_BCN_EARLY_TERM_WAKE_MAX ),
-
-   REG_VARIABLE( CFG_AP_DATA_AVAIL_POLL_PERIOD_NAME, WLAN_PARAM_Integer,
-                 hdd_config_t, apDataAvailPollPeriodInMs,
-                 VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
-                 CFG_AP_DATA_AVAIL_POLL_PERIOD_DEFAULT,
-                 CFG_AP_DATA_AVAIL_POLL_PERIOD_MIN,
-                 CFG_AP_DATA_AVAIL_POLL_PERIOD_MAX ),
 
    REG_VARIABLE( CFG_ENABLE_BYPASS_11D_NAME, WLAN_PARAM_Integer,
                  hdd_config_t, enableBypass11d,
@@ -5517,7 +5495,6 @@ void print_hdd_cfg(hdd_context_t *pHddCtx)
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [maxListenInterval] Value = [%u] ",pHddCtx->cfg_ini->nTeleBcnMaxListenInterval);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [maxLiNumIdleBeacons] Value = [%u] ",pHddCtx->cfg_ini->nTeleBcnMaxLiNumIdleBeacons);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [bcnEarlyTermWakeInterval] Value = [%u] ",pHddCtx->cfg_ini->bcnEarlyTermWakeInterval);
-  VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gApDataAvailPollInterVal] Value = [%u] ",pHddCtx->cfg_ini->apDataAvailPollPeriodInMs);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gEnableBypass11d] Value = [%u] ",pHddCtx->cfg_ini->enableBypass11d);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gEnableDFSChnlScan] Value = [%u] ",pHddCtx->cfg_ini->enableDFSChnlScan);
   VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH, "Name = [gEnableDFSPnoChnlScan] Value = [%u] ",pHddCtx->cfg_ini->enable_dfs_pno_chnl_scan);
@@ -6560,6 +6537,23 @@ bool hdd_cfg_is_sub20_channel_width_enabled(hdd_context_t *hdd_ctx_ptr)
 }
 
 /**
+ * hdd_cfg_is_static_sub20_channel_width_enabled()
+ * @hdd_ctx_ptr:  HDD context
+ *
+ * This function is used to check if static sub 20MHz enabled
+ * Return: true of false
+ */
+bool hdd_cfg_is_static_sub20_channel_width_enabled(hdd_context_t *hdd_ctx_ptr)
+{
+	hdd_config_t *config_ptr = hdd_ctx_ptr->cfg_ini;
+
+	return (config_ptr->sub_20_channel_width ==
+		CFG_SUB_20_CHANNEL_WIDTH_5MHZ) ||
+	       (config_ptr->sub_20_channel_width ==
+		CFG_SUB_20_CHANNEL_WIDTH_10MHZ);
+}
+
+/**
  * hdd_cfg_get_sub20_channel_config()
  * @hdd_ctx_ptr:  HDD context
  *
@@ -7217,13 +7211,6 @@ v_BOOL_t hdd_update_config_dat( hdd_context_t *pHddCtx )
         hddLog(LOGE,"Failure: Could not pass on WNI_CFG_HEART_BEAT_THRESHOLD configuration info to CCM");
     }
 
-   if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_AP_DATA_AVAIL_POLL_PERIOD, pConfig->apDataAvailPollPeriodInMs,
-               NULL, eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
-   {
-      fStatus = FALSE;
-      hddLog(LOGE,"Failure: Could not pass on WNI_CFG_AP_DATA_AVAIL_POLL_PERIOD configuration info to CCM");
-   }
-
    if (ccmCfgSetInt(pHddCtx->hHal, WNI_CFG_SHORT_GI_40MHZ,
       pConfig->ShortGI40MhzEnable, NULL, eANI_BOOLEAN_FALSE)==eHAL_STATUS_FAILURE)
    {
@@ -7673,9 +7660,6 @@ VOS_STATUS hdd_set_sme_config( hdd_context_t *pHddCtx )
    smeConfig->csrConfig.nRestTimeConc            = pConfig->nRestTimeConc;
    smeConfig->csrConfig.min_rest_time_conc       = pConfig->min_rest_time_conc;
    smeConfig->csrConfig.idle_time_conc           = pConfig->idle_time_conc;
-
-   smeConfig->csrConfig.nNumStaChanCombinedConc  = pConfig->nNumStaChanCombinedConc;
-   smeConfig->csrConfig.nNumP2PChanCombinedConc  = pConfig->nNumP2PChanCombinedConc;
 
 #endif
    smeConfig->csrConfig.Is11eSupportEnabled      = pConfig->b80211eIsEnabled;

@@ -819,7 +819,9 @@ enum qca_wlan_vendor_attr_extscan_results
      * number of blacklist bssid's that firmware can support.
      */
     QCA_WLAN_VENDOR_ATTR_EXTSCAN_MAX_NUM_BLACKLISTED_BSSID,
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+    QCA_WLAN_VENDOR_ATTR_EXTSCAN_PAD,
+#endif
     /* keep last */
     QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_AFTER_LAST,
     QCA_WLAN_VENDOR_ATTR_EXTSCAN_RESULTS_MAX =
@@ -1149,7 +1151,9 @@ enum qca_wlan_vendor_attr_ll_stats_results
     QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_PPDU_SUCC_CNT,
     /* Unsigned 32bit value */
     QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_PPDU_FAIL_CNT,
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+    QCA_WLAN_VENDOR_ATTR_LL_STATS_PAD,
+#endif
     /* keep last */
     QCA_WLAN_VENDOR_ATTR_LL_STATS_AFTER_LAST,
     QCA_WLAN_VENDOR_ATTR_LL_STATS_MAX =
@@ -2178,6 +2182,8 @@ enum qca_wlan_vendor_attr_get_station {
  *  rx stbc for remote peer
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_CH_WIDTH:
  *  ch widht for remote peer
+ * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_SGI_ENABLE:
+ *  sgi enable for remote peer
  * @QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST: After last
  */
 enum qca_wlan_vendor_attr_get_station_info {
@@ -2204,6 +2210,10 @@ enum qca_wlan_vendor_attr_get_station_info {
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_TX_STBC,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_RX_STBC,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_CH_WIDTH,
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_REMOTE_SGI_ENABLE,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
+	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_PAD,
+#endif
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_GET_STATION_INFO_MAX =
@@ -2484,6 +2494,28 @@ enum qca_wlan_vendor_attr_ll_stats_ext {
 	QCA_WLAN_VENDOR_ATTR_LL_STATS_EXT_MAX =
 		QCA_WLAN_VENDOR_ATTR_LL_STATS_EXT_LAST - 1,
 };
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0))
+/**
+ * enum ieee80211_band - supported frequency bands
+ *
+ * The bands are assigned this way because the supported
+ * bitrates differ in these bands.
+ *
+ * @IEEE80211_BAND_2GHZ: 2.4GHz ISM band
+ * @IEEE80211_BAND_5GHZ: around 5GHz band (4.9-5.7)
+ * @IEEE80211_BAND_60GHZ: around 60 GHz band (58.32 - 64.80 GHz)
+ * @IEEE80211_NUM_BANDS: number of defined bands
+ */
+enum ieee80211_band {
+	IEEE80211_BAND_2GHZ = NL80211_BAND_2GHZ,
+	IEEE80211_BAND_5GHZ = NL80211_BAND_5GHZ,
+	IEEE80211_BAND_60GHZ = NL80211_BAND_60GHZ,
+
+	/* keep last */
+	IEEE80211_NUM_BANDS
+};
+#endif
 
 struct cfg80211_bss* wlan_hdd_cfg80211_update_bss_db( hdd_adapter_t *pAdapter,
                                       tCsrRoamInfo *pRoamInfo

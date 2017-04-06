@@ -1448,6 +1448,9 @@ void vos_set_logp_in_progress(VOS_MODULE_ID moduleId, v_U8_t value)
         "%s: global voss context is NULL", __func__);
     return;
   }
+
+  VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_DEBUG,
+           "%s:%pS setting value %d",__func__, (void *)_RET_IP_, value);
   gpVosContext->isLogpInProgress = value;
 
   /* HDD uses it's own context variable to check if SSR in progress,
@@ -3111,4 +3114,29 @@ uint64_t vos_do_div(uint64_t dividend, uint32_t divisor)
 	do_div(dividend, divisor);
 	/*do_div macro updates dividend with Quotient of dividend/divisor */
 	return dividend;
+}
+
+/**
+ * vos_force_fw_dump() - force target to dump
+ *
+ *return
+ * VOS_STATUS_SUCCESS   - Operation completed successfully.
+ * VOS_STATUS_E_FAILURE - Operation failed.
+ */
+VOS_STATUS vos_force_fw_dump(void)
+{
+	struct ol_softc *scn;
+
+	scn = vos_get_context(VOS_MODULE_ID_HIF, gpVosContext);
+	if (!scn) {
+		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
+			  "%s: scn is null!", __func__);
+		return VOS_STATUS_E_FAILURE;
+	}
+	VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		  "%s:enter!", __func__);
+
+	ol_target_failure(scn, A_ERROR);
+
+	return VOS_STATUS_SUCCESS;
 }
