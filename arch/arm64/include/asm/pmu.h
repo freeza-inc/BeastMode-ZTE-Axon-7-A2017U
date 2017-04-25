@@ -51,6 +51,11 @@ struct pmu_hw_events {
 
 struct arm_pmu {
 	struct pmu		pmu;
+<<<<<<< HEAD
+=======
+	bool			percpu_irq_requested;
+	int			percpu_irq;
+>>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 	cpumask_t		active_irqs;
 	const char		*name;
 	irqreturn_t		(*handle_irq)(int irq_num, void *dev);

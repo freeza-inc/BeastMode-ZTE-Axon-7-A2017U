@@ -1072,6 +1072,11 @@ static int armv8pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 		}
 
 		on_each_cpu(armpmu_enable_percpu_irq, &irq, 1);
+<<<<<<< HEAD
+=======
+		cpu_pmu->percpu_irq_requested = true;
+		cpu_pmu->percpu_irq = irq;
+>>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 	} else {
 		for (i = 0; i < irqs; ++i) {
 			err = 0;
@@ -1511,7 +1516,12 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 
 	switch (masked_action) {
 	case CPU_DOWN_PREPARE:
+<<<<<<< HEAD
 		if (cpu_pmu->save_pm_registers)
+=======
+		if (pmu->percpu_irq_requested) {
+			int irq = pmu->percpu_irq;
+>>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 			smp_call_function_single(cpu,
 				cpu_pmu->save_pm_registers, hcpu, 1);
 		if (cpu_pmu->pmu_state != ARM_PMU_STATE_OFF) {
@@ -1529,6 +1539,7 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 
 	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
+<<<<<<< HEAD
 		/* Reset PMU to clear counters for ftrace buffer */
 		if (cpu_pmu->reset)
 			cpu_pmu->reset(NULL);
@@ -1545,6 +1556,14 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 				pmu = &cpu_pmu->pmu;
 				pmu->pmu_enable(pmu);
 			}
+=======
+		if (pmu->reset)
+			pmu->reset(pmu);
+		if (pmu->percpu_irq_requested) {
+			int irq = pmu->percpu_irq;
+			smp_call_function_single(cpu,
+				armpmu_enable_percpu_irq, &irq, 1);
+>>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 		}
 		break;
 	}
