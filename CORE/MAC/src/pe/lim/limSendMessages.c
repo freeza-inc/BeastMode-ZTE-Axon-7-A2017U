@@ -235,6 +235,7 @@ tSirRetStatus limSendSwitchChnlParams(tpAniSirGlobal pMac,
     tSirRetStatus   retCode = eSIR_SUCCESS;
     tSirMsgQ msgQ;
     tpPESession pSessionEntry;
+
     if((pSessionEntry = peFindSessionBySessionId(pMac, peSessionId)) == NULL)
     {
        limLog( pMac, LOGP,
@@ -277,6 +278,12 @@ tSirRetStatus limSendSwitchChnlParams(tpAniSirGlobal pMac,
             pChnlParams->channelwidth = CH_WIDTH_5MHZ;
     else if (pSessionEntry->sub20_channelwidth == SUB20_MODE_10MHZ)
             pChnlParams->channelwidth = CH_WIDTH_10MHZ;
+
+    if (pSessionEntry->bssType == eSIR_INFRASTRUCTURE_MODE &&
+        pSessionEntry->sub20_channelwidth !=
+        pMac->sta_sub20_current_channelwidth)
+        sme_set_sta_chanlist_with_sub20(pMac,
+                                        pSessionEntry->sub20_channelwidth);
 
     limLog(pMac, LOG1, FL("Set sub20 channel width %d"),
            pSessionEntry->sub20_channelwidth);
