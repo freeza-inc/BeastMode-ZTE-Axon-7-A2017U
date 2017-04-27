@@ -55,7 +55,13 @@ struct arm_pmu {
 =======
 	bool			percpu_irq_requested;
 	int			percpu_irq;
+<<<<<<< HEAD
 >>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
+=======
+>>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
+=======
+	bool			percpu_irq_requested;
+>>>>>>> e61de0f... perf:arm64: fix pmu percpu irq handling at hotplug.
 	cpumask_t		active_irqs;
 	const char		*name;
 	irqreturn_t		(*handle_irq)(int irq_num, void *dev);
