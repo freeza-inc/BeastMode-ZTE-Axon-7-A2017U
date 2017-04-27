@@ -396,9 +396,7 @@ armpmu_disable_percpu_irq(void *data)
 static void
 armpmu_release_hardware(struct arm_pmu *armpmu)
 {
-	get_online_cpus();
 	armpmu->free_irq(armpmu);
-	put_online_cpus();
 }
 
 static void
@@ -419,16 +417,15 @@ armpmu_reserve_hardware(struct arm_pmu *armpmu)
 		return -ENODEV;
 	}
 
-	get_online_cpus();
 	err = armpmu->request_irq(armpmu, armpmu->handle_irq);
-	if (err)
+	if (err) {
 		armpmu_release_hardware(armpmu);
-	put_online_cpus();
-	return err;
+		return err;
 	}
 
 	armpmu->pmu_state = ARM_PMU_STATE_RUNNING;
 
+	return 0;
 }
 
 static void
@@ -1075,15 +1072,6 @@ static int armv8pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 		}
 
 		on_each_cpu(armpmu_enable_percpu_irq, &irq, 1);
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-		cpu_pmu->percpu_irq_requested = true;
-		cpu_pmu->percpu_irq = irq;
->>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
-=======
-		cpu_pmu->percpu_irq_requested = true;
->>>>>>> e61de0f... perf:arm64: fix pmu percpu irq handling at hotplug.
 	} else {
 		for (i = 0; i < irqs; ++i) {
 			err = 0;
@@ -1141,7 +1129,6 @@ static void armv8pmu_free_irq(struct arm_pmu *cpu_pmu)
 	if (irq_is_percpu(irq)) {
 		on_each_cpu(armpmu_disable_percpu_irq, &irq, 1);
 		free_percpu_irq(irq, &cpu_hw_events);
-		cpu_pmu->percpu_irq_requested = false;
 	} else {
 		for (i = 0; i < irqs; ++i) {
 			if (!cpumask_test_and_clear_cpu(i,
@@ -1398,7 +1385,6 @@ arch_initcall(cpu_pmu_reset);
 
 static int cpu_has_active_perf(int cpu)
 {
-<<<<<<< HEAD
 	struct pmu_hw_events *hw_events;
 	int enabled;
 
@@ -1412,32 +1398,6 @@ static int cpu_has_active_perf(int cpu)
 		return 1;
 
 	return 0;
-=======
-	int cpu = (unsigned long)hcpu;
-	struct arm_pmu *pmu = container_of(b, struct arm_pmu, hotplug_nb);
-
-	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_DOWN_PREPARE:
-		if (pmu->percpu_irq_requested) {
-			int irq = platform_get_irq(pmu->plat_device, 0);
-			smp_call_function_single(cpu,
-				armpmu_disable_percpu_irq, &irq, 1);
-		}
-		break;
-
-	case CPU_STARTING:
-	case CPU_DOWN_FAILED:
-		if (pmu->reset)
-			pmu->reset(pmu);
-		if (pmu->percpu_irq_requested) {
-			int irq = platform_get_irq(pmu->plat_device, 0);
-			smp_call_function_single(cpu,
-				armpmu_enable_percpu_irq, &irq, 1);
-		}
-		break;
-	}
-	return NOTIFY_DONE;
->>>>>>> e61de0f... perf:arm64: fix pmu percpu irq handling at hotplug.
 }
 
 static void armpmu_update_counters(void *x)
@@ -1551,15 +1511,7 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 
 	switch (masked_action) {
 	case CPU_DOWN_PREPARE:
-<<<<<<< HEAD
 		if (cpu_pmu->save_pm_registers)
-=======
-		if (pmu->percpu_irq_requested) {
-			int irq = pmu->percpu_irq;
-<<<<<<< HEAD
->>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
-=======
->>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 			smp_call_function_single(cpu,
 				cpu_pmu->save_pm_registers, hcpu, 1);
 		if (cpu_pmu->pmu_state != ARM_PMU_STATE_OFF) {
@@ -1577,7 +1529,6 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 
 	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
-<<<<<<< HEAD
 		/* Reset PMU to clear counters for ftrace buffer */
 		if (cpu_pmu->reset)
 			cpu_pmu->reset(NULL);
@@ -1594,14 +1545,6 @@ static int __cpuinit cpu_pmu_notify(struct notifier_block *b,
 				pmu = &cpu_pmu->pmu;
 				pmu->pmu_enable(pmu);
 			}
-=======
-		if (pmu->reset)
-			pmu->reset(pmu);
-		if (pmu->percpu_irq_requested) {
-			int irq = pmu->percpu_irq;
-			smp_call_function_single(cpu,
-				armpmu_enable_percpu_irq, &irq, 1);
->>>>>>> 4c08f20... perf:arm64: fix lockdep warning when handling CPU_STARTING.
 		}
 		break;
 	}
