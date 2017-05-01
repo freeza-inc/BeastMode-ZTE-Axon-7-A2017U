@@ -437,8 +437,7 @@ bool adf_log_eapol_pkt(uint8_t session_id, struct sk_buff *skb,
 	enum adf_proto_subtype subtype;
 
 	if ((adf_dp_get_proto_bitmap() & NBUF_PKT_TRAC_TYPE_EAPOL) &&
-		((dir == ADF_TX && ADF_NBUF_GET_IS_EAPOL(skb)) ||
-		(dir == ADF_RX && adf_nbuf_is_eapol_pkt(skb)))) {
+		ADF_NBUF_GET_IS_EAPOL(skb)) {
 
 		subtype = adf_nbuf_get_eapol_subtype(skb);
 		DPTRACE(adf_dp_trace_proto_pkt(ADF_DP_TRACE_EAPOL_PACKET_RECORD,
@@ -469,8 +468,7 @@ bool adf_log_dhcp_pkt(uint8_t session_id, struct sk_buff *skb,
 	enum adf_proto_subtype subtype = ADF_PROTO_INVALID;
 
 	if ((adf_dp_get_proto_bitmap() & NBUF_PKT_TRAC_TYPE_DHCP) &&
-		((dir == ADF_TX && ADF_NBUF_GET_IS_DHCP(skb)) ||
-		(dir == ADF_RX && adf_nbuf_is_dhcp_pkt(skb)))) {
+		ADF_NBUF_GET_IS_DHCP(skb)) {
 
 		subtype = adf_nbuf_get_dhcp_subtype(skb);
 		DPTRACE(adf_dp_trace_proto_pkt(ADF_DP_TRACE_DHCP_PACKET_RECORD,
@@ -502,8 +500,7 @@ bool adf_log_arp_pkt(uint8_t session_id, struct sk_buff *skb,
 	enum adf_proto_subtype proto_subtype;
 
 	if ((adf_dp_get_proto_bitmap() & NBUF_PKT_TRAC_TYPE_ARP) &&
-	    ((dir == ADF_TX && ADF_NBUF_GET_IS_ARP(skb)) ||
-	    (dir == ADF_RX && adf_nbuf_is_ipv4_arp_pkt(skb)))){
+	     ADF_NBUF_GET_IS_ARP(skb)) {
 
 		proto_subtype = adf_nbuf_get_arp_subtype(skb);
 
@@ -667,10 +664,6 @@ void adf_dp_trace_ptr(adf_nbuf_t nbuf, enum ADF_DP_TRACE_ID code,
 void adf_dp_display_record(struct adf_dp_trace_record_s *pRecord,
 				uint16_t recIndex)
 {
-	uint8_t rsize = pRecord->size;
-	if (rsize > ADF_DP_TRACE_RECORD_SIZE)
-		rsize = ADF_DP_TRACE_RECORD_SIZE;
-
 	adf_os_print("DPT: %04d: %012llu: %s\n", recIndex,
 		pRecord->time, adf_dp_code_to_string(pRecord->code));
 	switch (pRecord->code) {
@@ -683,10 +676,10 @@ void adf_dp_display_record(struct adf_dp_trace_record_s *pRecord,
 						"HDD SoftAP TX Timeout\n");
 		break;
 	case ADF_DP_TRACE_HDD_TX_PACKET_RECORD:
-		dump_hex_trace("DATA", pRecord->data, rsize);
+		dump_hex_trace("DATA", pRecord->data, pRecord->size);
 		break;
 	default:
-		dump_hex_trace("cookie", pRecord->data, rsize);
+		dump_hex_trace("cookie", pRecord->data, pRecord->size);
 	}
 }
 

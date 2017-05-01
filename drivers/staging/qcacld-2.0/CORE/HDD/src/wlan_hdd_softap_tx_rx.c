@@ -270,30 +270,7 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
    while (skb) {
        skb_next = skb->next;
-       /* memset skb control block */
-       vos_mem_zero(skb->cb, sizeof(skb->cb));
-       wlan_hdd_classify_pkt(skb);
-
        pDestMacAddress = (v_MACADDR_t*)skb->data;
-
-/*
-* The TCP TX throttling logic is changed a little after 3.19-rc1 kernel,
-* the TCP sending limit will be smaller, which will throttle the TCP packets
-* to the host driver. The TCP UP LINK throughput will drop heavily.
-* In order to fix this issue, need to orphan the socket buffer asap, which will
-* call skb's destructor to notify the TCP stack that the SKB buffer is
-* unowned. And then the TCP stack will pump more packets to host driver.
-*
-* The TX packets might be dropped for UDP case in the iperf testing.
-* So need to be protected by follow control.
-*/
-#ifdef QCA_LL_TX_FLOW_CT
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,19,0))
-       if (pAdapter->tx_flow_low_watermark > 0) {
-           skb_orphan(skb);
-       }
-#endif
-#endif
 
        if (vos_is_macaddr_broadcast( pDestMacAddress ) ||
            vos_is_macaddr_group(pDestMacAddress))
@@ -378,6 +355,9 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
        ac = hdd_QdiscAcToTlAC[skb->queue_mapping];
        ++pAdapter->hdd_stats.hddTxRxStats.txXmitClassifiedAC[ac];
 
+       adf_dp_trace_log_pkt(pAdapter->sessionId, skb,
+                          WIFI_EVENT_DRIVER_EAPOL_FRAME_TRANSMIT_REQUESTED);
+
 #ifdef QCA_PKT_PROTO_TRACE
        if ((hddCtxt->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
            (hddCtxt->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP))
@@ -385,24 +365,13 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            /* Proto Trace enabled */
            proto_type = vos_pkt_get_proto_type(skb,
                         hddCtxt->cfg_ini->gEnableDebugLog, 0);
-           switch (proto_type) {
-           case VOS_PKT_TRAC_TYPE_EAPOL:
+           if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
+           {
                vos_pkt_trace_buf_update("HA:T:EPL");
-               break;
-           case VOS_PKT_TRAC_TYPE_DHCP:
+           }
+           else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
+           {
                hdd_dhcp_pkt_trace_buf_update(skb, TX_PATH, AP);
-               break;
-           case VOS_PKT_TRAC_TYPE_ARP:
-               vos_pkt_trace_buf_update("HA:T:ARP");
-               break;
-           case VOS_PKT_TRAC_TYPE_NS:
-               vos_pkt_trace_buf_update("HA:T:NS");
-               break;
-           case VOS_PKT_TRAC_TYPE_NA:
-               vos_pkt_trace_buf_update("HA:T:NA");
-               break;
-           default:
-               break;
            }
        }
 #endif /* QCA_PKT_PROTO_TRACE */
@@ -417,8 +386,7 @@ int __hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
            list_tail->next = skb;
            list_tail = list_tail->next;
        }
-
-       adf_dp_trace_log_pkt(pAdapter->sessionId, skb, ADF_TX);
+       vos_mem_zero(skb->cb, sizeof(skb->cb));
        NBUF_SET_PACKET_TRACK(skb, NBUF_TX_PKT_DATA_TRACK);
        NBUF_UPDATE_TX_PKT_COUNT(skb, NBUF_TX_PKT_HDD);
 
@@ -867,45 +835,24 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
       ++pAdapter->stats.rx_packets;
       pAdapter->stats.rx_bytes += skb->len;
 
-      DPTRACE(adf_dp_trace(skb,
+      DPTRACE(adf_dp_trace(rxBuf,
               ADF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD,
-              adf_nbuf_data_addr(skb),
-              sizeof(adf_nbuf_data(skb)), ADF_RX));
+              adf_nbuf_data_addr(rxBuf),
+              sizeof(adf_nbuf_data(rxBuf)), ADF_RX));
 
 #ifdef QCA_PKT_PROTO_TRACE
       if ((pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_EAPOL) ||
           (pHddCtx->cfg_ini->gEnableDebugLog & VOS_PKT_TRAC_TYPE_DHCP)) {
          proto_type = vos_pkt_get_proto_type(skb,
                            pHddCtx->cfg_ini->gEnableDebugLog, 0);
-         switch (proto_type) {
-         case VOS_PKT_TRAC_TYPE_EAPOL:
-             vos_pkt_trace_buf_update("HA:R:EPL");
-             break;
-         case VOS_PKT_TRAC_TYPE_DHCP:
-             hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, AP);
-             break;
-         case VOS_PKT_TRAC_TYPE_ARP:
-             vos_pkt_trace_buf_update("HA:R:ARP");
-             break;
-         case VOS_PKT_TRAC_TYPE_NS:
-             vos_pkt_trace_buf_update("HA:R:NS");
-             break;
-         case VOS_PKT_TRAC_TYPE_NA:
-             vos_pkt_trace_buf_update("HA:R:NA");
-             break;
-         default:
-             break;
-         }
+         if (VOS_PKT_TRAC_TYPE_EAPOL & proto_type)
+            vos_pkt_trace_buf_update("HA:R:EPL");
+         else if (VOS_PKT_TRAC_TYPE_DHCP & proto_type)
+            hdd_dhcp_pkt_trace_buf_update(skb, RX_PATH, AP);
       }
 #endif /* QCA_PKT_PROTO_TRACE */
 
       skb->protocol = eth_type_trans(skb, skb->dev);
-
-      /**
-       * Remove SKB from internal tracking table before submitting it
-       * to stack.
-       */
-      adf_net_buf_debug_release_skb(skb);
 
       /*
        * If this is not a last packet on the chain

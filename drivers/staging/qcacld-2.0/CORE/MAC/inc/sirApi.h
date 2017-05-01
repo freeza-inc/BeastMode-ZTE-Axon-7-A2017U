@@ -102,14 +102,6 @@ typedef tANI_U8 tSirVersionString[SIR_VERSION_STRING_LEN];
 
 #define NUM_CHAINS_MAX  2
 
-#ifdef ACS_FW_REPORT_PARAM
-#define SIR_MAX_SUPPORTED_ACS_CHANNEL_LIST SIR_MAX_SUPPORTED_CHANNEL_LIST
-#define ACS_FW_REPORT_PARAM_CONFIGURED true
-#else
-#define SIR_MAX_SUPPORTED_ACS_CHANNEL_LIST 1
-#define ACS_FW_REPORT_PARAM_CONFIGURED false
-#endif
-
 typedef enum
 {
     eSIR_EXTSCAN_INVALID,
@@ -2986,32 +2978,6 @@ typedef struct sLimScanChn
     tANI_U8 channelId;
 }tLimScanChn;
 
-/**
- * struct lim_channel_status
- * @channelfreq: Channel freq
- * @noise_floor: Noise Floor value
- * @rx_clear_count: rx clear count
- * @cycle_count: cycle count
- * @chan_tx_pwr_range: channel tx power per range in 0.5dBm steps
- * @chan_tx_pwr_throughput: channel tx power per throughput
- * @rx_frame_count: rx frame count (cumulative)
- * @bss_rx_cycle_count: BSS rx cycle count
- * @rx_11b_mode_data_duration: b-mode data rx time (units are microseconds)
- * @channel_id: channel index
- */
-struct lim_channel_status {
-	uint32_t    channelfreq;
-	uint32_t    noise_floor;
-	uint32_t    rx_clear_count;
-	uint32_t    cycle_count;
-	uint32_t    chan_tx_pwr_range;
-	uint32_t    chan_tx_pwr_throughput;
-	uint32_t    rx_frame_count;
-	uint32_t    bss_rx_cycle_count;
-	uint32_t    rx_11b_mode_data_duration;
-	uint32_t    channel_id;
-};
-
 typedef struct sSmeGetScanChnRsp
 {
     // Message Type
@@ -3028,17 +2994,6 @@ typedef struct sLimScanChnInfo
     tANI_U8 numChnInfo;     //number of channels in scanChn
     tLimScanChn scanChn[SIR_MAX_SUPPORTED_CHANNEL_LIST];
 }tLimScanChnInfo;
-
-/**
- * struct lim_scan_channel_status
- * @total_channel: total number of be scanned channel
- * @channel_status_list: channel status info store in this array
- */
-struct lim_scan_channel_status {
-	uint8_t total_channel;
-	struct lim_channel_status
-	 channel_status_list[SIR_MAX_SUPPORTED_ACS_CHANNEL_LIST];
-};
 
 typedef struct sSirSmeGetAssocSTAsReq
 {
@@ -4094,7 +4049,7 @@ typedef struct sSirTxPerTrackingParam
 #define    SIR_IPV4_ADDR_LEN                 4
 #define    SIR_MAC_ADDR_LEN                  6
 #define    SIR_MAX_FILTER_TEST_DATA_LEN       8
-#define    SIR_MAX_NUM_MULTICAST_ADDRESS    16
+#define    SIR_MAX_NUM_MULTICAST_ADDRESS    240
 #define    SIR_MAX_NUM_FILTERS               20
 #define    SIR_MAX_NUM_TESTS_PER_FILTER      10
 
@@ -4387,7 +4342,6 @@ typedef struct
     tANI_U16            transactionId; // Transaction ID for cmd
     tSirResultCodes        statusCode;
     tSirMacAddr            peerMac;
-    uint16_t            sta_idx;
 }tSirTdlsLinkEstablishReqRsp, *tpSirTdlsLinkEstablishReqRsp;
 
 /* TDLS Request struct SME-->PE */
@@ -4459,7 +4413,6 @@ typedef struct sSirActiveModeSetBcnFilterReq
    tANI_U16               messageType;
    tANI_U16               length;
    tANI_U8                seesionId;
-   tSirMacAddr            bssid;
 } tSirSetActiveModeSetBncFilterReq, *tpSirSetActiveModeSetBncFilterReq;
 
 //Reset AP Caps Changed
@@ -5269,7 +5222,6 @@ struct ext_scan_capabilities_response
 	uint32_t    max_number_epno_networks;
 	uint32_t    max_number_epno_networks_by_ssid;
 	uint32_t    max_number_of_white_listed_ssid;
-	uint32_t    max_number_of_black_listed_bssid;
 };
 
 
@@ -6066,8 +6018,6 @@ typedef struct
     tSirMacAddr    peerMacAddress;
     /* peer WIFI_CAPABILITY_XXX */
     tANI_U32       capabilities;
-    /* peer power saving mode */
-    uint32_t power_saving;
     /* number of rates */
     tANI_U32       numRate;
     /* per rate statistics, number of entries  = num_rate */
@@ -6198,21 +6148,6 @@ typedef struct
 /** Clear particular peer stats depending on the peer_mac */
 #define WIFI_STATS_IFACE_PER_PEER      0x00000200
 
-/**
- * struct sir_wifi_iface_tx_fail - TX failure event
- * @tid: TX TID
- * @msdu_num: TX MSDU failed counter
- * @status: failure status
- *    1: TX packet discarded
- *    2: No ACK
- *    3: Postpone
- */
-struct sir_wifi_iface_tx_fail {
-	uint8_t  tid;
-	uint16_t msdu_num;
-	uint32_t status;
-};
-
 typedef struct
 {
     tANI_U32 paramId;
@@ -6229,11 +6164,6 @@ typedef struct
     /* Variable  length field - Do not add anything after this */
     tANI_U8 results[0];
 } tSirLLStatsResults, *tpSirLLStatsResults;
-
-/* Result ID for LL stats extension */
-#define WMI_LL_STATS_EXT_PS_CHG             0x00000100
-#define WMI_LL_STATS_EXT_TX_FAIL            0x00000200
-#define WMI_LL_STATS_EXT_MAC_COUNTER        0x00000400
 
 #endif /* WLAN_FEATURE_LINK_LAYER_STATS */
 
@@ -6840,23 +6770,6 @@ struct wow_pulse_mode {
 };
 
 /*
- * struct wakeup_gpio_mode
- * @host_wakeup_gpio: GPIO num used to wakeup host
- * @host_wakeup_type: Wakeup type for host. Refer to WMI_WAKE_GPIO_TYPE
- * @target_wakeup_gpio: GPIO num used to wakeup target
- * @target_wakeup_type: Wakeup type for target. Refer to WMI_WAKE_GPIO_TYPE
- *
- * SME uses this structure to configure wakeup gpio info
- * and send it to WMA
- */
-struct wakeup_gpio_mode {
-	uint32_t     host_wakeup_gpio;
-	uint32_t     host_wakeup_type;
-	uint32_t     target_wakeup_gpio;
-	uint32_t     target_wakeup_type;
-};
-
-/*
  * struct egap_params - the enhanced green ap params
  * @vdev_id: vdev id
  * @enable: enable or disable the enhance green ap in firmware
@@ -6873,7 +6786,6 @@ struct egap_conf_params {
 	uint32_t   flags;
 };
 
-#define SIR_BCN_FLT_MAX_ELEMS_IE_LIST 8
 /**
  * struct beacon_filter_param - parameters for beacon filtering
  * @vdev_id: vdev id
@@ -6882,7 +6794,7 @@ struct egap_conf_params {
  */
 struct beacon_filter_param {
 	uint32_t   vdev_id;
-	uint32_t   ie_map[SIR_BCN_FLT_MAX_ELEMS_IE_LIST];
+	uint32_t   ie_map[8];
 };
 
 /**
@@ -7308,7 +7220,6 @@ struct ndp_app_info {
  struct ndi_create_rsp {
 	uint32_t status;
 	uint32_t reason;
-	uint8_t sta_id;
 };
 
 /**
@@ -7620,25 +7531,5 @@ struct sme_long_retry_limit {
 struct sme_sta_inactivity_timeout {
 	uint8_t session_id;
 	uint32_t sta_inactivity_timeout;
-};
-
-/**
- * struct scan_chan_info - channel info
- * @freq: radio frequence
- * @cmd flag: cmd flag
- * @noise_floor: noise floor
- * @cycle_count: cycle count
- * @rx_clear_count: rx clear count
- * @tx_frame_count: TX frame count
- * @clock_freq: clock frequence MHZ
- */
-struct scan_chan_info {
-	uint32_t freq;
-	uint32_t cmd_flag;
-	uint32_t noise_floor;
-	uint32_t cycle_count;
-	uint32_t rx_clear_count;
-	uint32_t tx_frame_count;
-	uint32_t clock_freq;
 };
 #endif /* __SIR_API_H */

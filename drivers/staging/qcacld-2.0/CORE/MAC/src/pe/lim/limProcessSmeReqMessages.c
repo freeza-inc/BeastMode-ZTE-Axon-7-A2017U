@@ -39,7 +39,7 @@
 
 #include "palTypes.h"
 #include "wniApi.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
 #include "cfgApi.h"
 #include "sirApi.h"
 #include "schApi.h"
@@ -60,7 +60,7 @@
 #include "regdomain_common.h"
 #include "rrmApi.h"
 #include "nan_datapath.h"
-#include "wma.h"
+
 #include "sapApi.h"
 
 #if defined(FEATURE_WLAN_ESE) && !defined(FEATURE_WLAN_ESE_UPLOAD)
@@ -1199,14 +1199,9 @@ static eHalStatus limSendHalStartScanOffloadReq(tpAniSirGlobal pMac,
     tANI_U8 *vht_cap_ie;
     tANI_U16 vht_cap_len = 0;
 #endif /* WLAN_FEATURE_11AC */
-    uint8_t *vendor_tpc_ie;
     tSirRetStatus status, rc = eSIR_SUCCESS;
     tDot11fIEExtCap extracted_extcap = {0};
     bool extcap_present = true;
-    uint32_t lim_11h_enable = WNI_CFG_11H_ENABLED_STADEF;
-
-    wlan_cfgGetInt(pMac, WNI_CFG_11H_ENABLED, &lim_11h_enable);
-
 
     pMac->lim.fOffloadScanPending = 0;
     pMac->lim.fOffloadScanP2PSearch = 0;
@@ -1257,11 +1252,6 @@ static eHalStatus limSendHalStartScanOffloadReq(tpAniSirGlobal pMac,
             addn_ie_len += vht_cap_len;
         }
 #endif /* WLAN_FEATURE_11AC */
-    }
-
-    if (lim_11h_enable) {
-            addn_ie_len += DOT11F_IE_WFATPC_MAX_LEN + 2;
-            len += DOT11F_IE_WFATPC_MAX_LEN + 2;
     }
 
     pScanOffloadReq = vos_mem_malloc(len);
@@ -1366,24 +1356,6 @@ static eHalStatus limSendHalStartScanOffloadReq(tpAniSirGlobal pMac,
             pScanOffloadReq->uIEFieldLen += vht_cap_len;
         }
 #endif /* WLAN_FEATURE_11AC */
-    }
-
-    if (lim_11h_enable) {
-            tDot11fIEWFATPC wfa_tpc;
-            vendor_tpc_ie = (uint8_t *) pScanOffloadReq +
-                                 pScanOffloadReq->uIEFieldOffset +
-                                 pScanOffloadReq->uIEFieldLen;
-            PopulateDot11fWFATPC(pMac, &wfa_tpc,
-                                 rrmGetMgmtTxPower(pMac, NULL), 0);
-            vendor_tpc_ie[0] = DOT11F_EID_WFATPC;
-            vendor_tpc_ie[1] = DOT11F_IE_WFATPC_MAX_LEN;
-            vos_mem_copy(&vendor_tpc_ie[2], SIR_MAC_WFA_TPC_OUI,
-                                 SIR_MAC_WFA_TPC_OUI_SIZE);
-            vos_mem_copy(&vendor_tpc_ie[SIR_MAC_WFA_TPC_OUI_SIZE + 2],
-                                 ((uint8_t *)&wfa_tpc) + 1,
-                                  DOT11F_IE_WFATPC_MAX_LEN
-                                  - SIR_MAC_WFA_TPC_OUI_SIZE);
-            pScanOffloadReq->uIEFieldLen += DOT11F_IE_WFATPC_MAX_LEN + 2;
     }
 
     rc = wdaPostCtrlMsg(pMac, &msg);
@@ -1814,8 +1786,6 @@ static void __limProcessSmeOemDataReq(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
     if (!pMlmOemDataReq->data) {
         limLog(pMac, LOGP, FL("memory allocation failed"));
         vos_mem_free(pMlmOemDataReq);
-        /* buffer from SME copied, free it now */
-        vos_mem_free(pOemDataReq->data);
         return;
     }
 
@@ -1949,7 +1919,7 @@ __limProcessSmeJoinReq(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
             vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                            WLAN_LOG_INDICATOR_HOST_DRIVER,
                            WLAN_LOG_REASON_STALE_SESSION_FOUND,
-                           DUMP_VOS_TRACE);
+                           true);
             retCode = eSIR_SME_REFUSED;
             goto end;
         }
@@ -2105,14 +2075,17 @@ __limProcessSmeJoinReq(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
             psessionEntry->txMuBformee = pSmeJoinReq->txMuBformee;
             psessionEntry->enableVhtpAid = pSmeJoinReq->enableVhtpAid;
             psessionEntry->enableVhtGid = pSmeJoinReq->enableVhtGid;
-            if (cfgSetInt(pMac, WNI_CFG_VHT_SU_BEAMFORMEE_CAP,
-                    psessionEntry->txBFIniFeatureEnabled)) {
-                    limLog(pMac, LOGE, FL("Could not set WNI_CFG_VHT_SU_BEAMFORMEE_CAP at CFG"));
+            if( psessionEntry->txBFIniFeatureEnabled )
+            {
+                if (cfgSetInt(pMac, WNI_CFG_VHT_SU_BEAMFORMEE_CAP,
+                                     psessionEntry->txBFIniFeatureEnabled)
+                                                             != eSIR_SUCCESS)
+                {
+                    limLog(pMac, LOGE, FL("could not set  "
+                                  "WNI_CFG_VHT_SU_BEAMFORMEE_CAP at CFG"));
                     retCode = eSIR_LOGP_EXCEPTION;
                     goto end;
-            }
-
-            if (psessionEntry->txBFIniFeatureEnabled) {
+                }
                 if (cfgSetInt(pMac, WNI_CFG_VHT_CSN_BEAMFORMEE_ANT_SUPPORTED,
                                                        pSmeJoinReq->txBFCsnValue)
                                                              != eSIR_SUCCESS)
@@ -2499,7 +2472,7 @@ __limProcessSmeReassocReq(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
         vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                       WLAN_LOG_INDICATOR_HOST_DRIVER,
                       WLAN_LOG_REASON_STALE_SESSION_FOUND,
-                      DUMP_VOS_TRACE);
+                      true);
         retCode = eSIR_SME_REFUSED;
         goto end;
    }
@@ -5248,11 +5221,6 @@ static void __limProcessSmeSetHT2040Mode(tpAniSirGlobal pMac, tANI_U32 *pMsgBuf)
             vos_mem_copy(pHtOpMode->peer_mac, &pStaDs->staAddr,
                  sizeof(tSirMacAddr));
             pHtOpMode->smesessionId = sessionId;
-            pHtOpMode->chanMode = wma_chan_to_mode(
-                                     psessionEntry->currentOperChannel,
-                                     psessionEntry->htSecondaryChannelOffset,
-                                     psessionEntry->vhtCapability,
-                                     psessionEntry->dot11mode);
 
             msg.type     = WDA_UPDATE_OP_MODE;
             msg.reserved = 0;

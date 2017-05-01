@@ -821,7 +821,6 @@ static int tx_completion_task(void *param)
  */
 static inline void tx_completion_sem_init(HIF_DEVICE *device)
 {
-	spin_lock_init(&device->tx_completion_lock);
 	sema_init(&device->sem_tx_completion, 0);
 }
 
@@ -1515,10 +1514,14 @@ static int hifDeviceInserted(struct sdio_func *func, const struct sdio_device_id
     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
             ("AR6000: hifDeviceInserted, Function: 0x%X, Vendor ID: 0x%X, Device ID: 0x%X, block size: 0x%X/0x%X\n",
              func->num, func->vendor, id->device, func->max_blksize, func->cur_blksize));
-
-    /* dma_mask should be populated here. Use the parent device's setting. */
-    func->dev.dma_mask = mmc_dev(func->card->host)->dma_mask;
-
+    /*
+    dma_mask should not be NULL, otherwise dma_map_single will crash.
+    TODO: check why dma_mask is NULL here
+    */
+    if (func->dev.dma_mask == NULL){
+        static u64 dma_mask = 0xFFFFFFFF;
+        func->dev.dma_mask = &dma_mask;
+    }
     for (i=0; i<MAX_HIF_DEVICES; ++i) {
         HIF_DEVICE *hifdevice = hif_devices[i];
         if (hifdevice && hifdevice->powerConfig == HIF_DEVICE_POWER_CUT &&
@@ -1966,11 +1969,6 @@ static A_STATUS hifEnableFunc(HIF_DEVICE *device, struct sdio_func *func)
     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE, ("AR6000: +hifEnableFunc\n"));
     device = getHifDevice(func);
 
-    if (!device) {
-        AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("HIF device is NULL\n"));
-        return A_EINVAL;
-    }
-
     if (device->is_disabled) {
         int setAsyncIRQ = 0;
         __u16 manufacturer_id = device->id->device & MANUFACTURER_ID_AR6K_BASE_MASK;
@@ -2096,7 +2094,8 @@ static A_STATUS hifEnableFunc(HIF_DEVICE *device, struct sdio_func *func)
         AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
              ("AR6k: call devicePwrChangeApi\n"));
         /* start  up inform DRV layer */
-        if (device->claimedContext &&
+        if (device &&
+            device->claimedContext &&
             osdrvCallbacks.devicePowerChangeHandler &&
             ((ret = osdrvCallbacks.devicePowerChangeHandler(
                   device->claimedContext, HIF_DEVICE_POWER_UP)) != A_OK))

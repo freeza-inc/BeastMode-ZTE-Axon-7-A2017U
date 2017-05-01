@@ -423,8 +423,6 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
    /* Initialize the timer module */
    vos_timer_module_init();
 
-   vos_wdthread_init_timer_work(vos_process_wd_timer);
-
    /* Initialize bug reporting structure */
    vos_init_log_completion();
 
@@ -573,8 +571,6 @@ VOS_STATUS vos_open( v_CONTEXT_t *pVosContext, v_SIZE_t hddContextSize )
   macOpenParms.enable_bcst_ptrn = pHddCtx->cfg_ini->bcastptrn;
   macOpenParms.enable_mc_list = pHddCtx->cfg_ini->fEnableMCAddrList;
 
-  macOpenParms.bpf_packet_filter_enable =
-               pHddCtx->cfg_ini->bpf_packet_filter_enable;
 #ifdef FEATURE_WLAN_RA_FILTERING
    macOpenParms.RArateLimitInterval = pHddCtx->cfg_ini->RArateLimitInterval;
    macOpenParms.IsRArateLimitEnabled = pHddCtx->cfg_ini->IsRArateLimitEnabled;
@@ -1263,8 +1259,6 @@ VOS_STATUS vos_close( v_CONTEXT_t vosContext )
 
   vos_deinit_log_completion();
 
-  vos_wdthread_flush_timer_work();
-
   return VOS_STATUS_SUCCESS;
 }
 
@@ -1943,7 +1937,7 @@ VOS_STATUS vos_mq_post_message_by_priority(VOS_MQ_ID msgQueueId,
            vos_flush_logs(WLAN_LOG_TYPE_FATAL,
                           WLAN_LOG_INDICATOR_HOST_ONLY,
                           WLAN_LOG_REASON_VOS_MSG_UNDER_RUN,
-                          DUMP_VOS_TRACE);
+                          true);
       }
       if (VOS_WRAPPER_MAX_FAIL_COUNT == debug_count) {
           vos_wlanRestart();
@@ -2101,6 +2095,7 @@ vos_fetch_tl_cfg_parms
 VOS_STATUS vos_shutdown(v_CONTEXT_t vosContext)
 {
   VOS_STATUS vosStatus;
+  tpAniSirGlobal pMac = (((pVosContextType)vosContext)->pMACContext);
 
   vosStatus = WLANTL_Close(vosContext);
   if (!VOS_IS_STATUS_SUCCESS(vosStatus))
@@ -2116,6 +2111,16 @@ VOS_STATUS vos_shutdown(v_CONTEXT_t vosContext)
      VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
          "%s: Failed to close SME", __func__);
      VOS_ASSERT( VOS_IS_STATUS_SUCCESS( vosStatus ) );
+  }
+
+  /* CAC timer will be initiated and started only when SAP starts on
+  * DFS channel and it will be stopped and destroyed immediately once the
+  * radar detected or timedout. So as per design CAC timer should be
+  * destroyed after stop.*/
+  if (pMac->sap.SapDfsInfo.is_dfs_cac_timer_running) {
+     vos_timer_stop(&pMac->sap.SapDfsInfo.sap_dfs_cac_timer);
+     pMac->sap.SapDfsInfo.is_dfs_cac_timer_running = 0;
+     vos_timer_destroy(&pMac->sap.SapDfsInfo.sap_dfs_cac_timer);
   }
 
   vosStatus = macClose( ((pVosContextType)vosContext)->pMACContext);
@@ -2882,8 +2887,6 @@ void vos_wlan_flush_host_logs_for_fatal(void)
  * @indicator: Source which trigerred the bug report
  * @reason_code: Reason for triggering bug report
  * @dump_vos_trace: If vos trace are needed in logs.
- * @pkt_trace: flag to indicate when to report packet trace
- *             dump this info when connection related error occurs
  *
  * This function sets the log related params and send the WMI command to the
  * FW to flush its logs. On receiving the flush completion event from the FW
@@ -2894,7 +2897,7 @@ void vos_wlan_flush_host_logs_for_fatal(void)
 VOS_STATUS vos_flush_logs(uint32_t is_fatal,
 		uint32_t indicator,
 		uint32_t reason_code,
-		uint32_t dump_trace)
+		bool dump_vos_trace)
 {
 	uint32_t ret;
 	VOS_STATUS status;
@@ -2935,15 +2938,14 @@ VOS_STATUS vos_flush_logs(uint32_t is_fatal,
 	}
 
 	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d dump_trace=0x%x",
-			__func__, is_fatal, indicator, reason_code, dump_trace);
+			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d",
+			__func__, is_fatal, indicator, reason_code);
 
-	if (dump_trace & DUMP_VOS_TRACE)
+	if (dump_vos_trace)
 		vosTraceDumpAll(vos_context->pMACContext, 0, 0, 500, 0);
 
 #ifdef QCA_PKT_PROTO_TRACE
-	if (dump_trace & DUMP_PACKET_TRACE)
-		vos_pkt_trace_buf_dump();
+	vos_pkt_trace_buf_dump();
 #endif
 	if (WLAN_LOG_INDICATOR_HOST_ONLY == indicator) {
 		vos_wlan_flush_host_logs_for_fatal();

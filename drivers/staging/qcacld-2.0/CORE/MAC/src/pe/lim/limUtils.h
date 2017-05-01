@@ -398,13 +398,12 @@ tSirRetStatus limPostSMStateUpdate(tpAniSirGlobal pMac,
 void limDeleteStaContext(tpAniSirGlobal pMac, tpSirMsgQ limMsg);
 void limProcessAddBaInd(tpAniSirGlobal pMac, tpSirMsgQ limMsg);
 void limDeleteBASessions(tpAniSirGlobal pMac, tpPESession pSessionEntry, tANI_U32 baDirection);
+void limDelPerBssBASessionsBtc(tpAniSirGlobal pMac);
 void limDelAllBASessions(tpAniSirGlobal pMac);
 void limDeleteDialogueTokenList(tpAniSirGlobal pMac);
 tSirRetStatus limSearchAndDeleteDialogueToken(tpAniSirGlobal pMac, tANI_U8 token, tANI_U16 assocId, tANI_U16 tid);
 void limRessetScanChannelInfo(tpAniSirGlobal pMac);
 void limAddScanChannelInfo(tpAniSirGlobal pMac, tANI_U8 channelId);
-void lim_add_channel_status_info(tpAniSirGlobal p_mac,
-	struct lim_channel_status *channel_stat, uint8_t channel_id);
 
 tANI_U8 limGetChannelFromBeacon(tpAniSirGlobal pMac, tpSchBeaconStruct pBeacon);
 tSirNwType limGetNwType(tpAniSirGlobal pMac, tANI_U8 channelNum, tANI_U32 type, tpSchBeaconStruct pBeacon);
@@ -455,13 +454,15 @@ uint32_t lim_get_max_rate_flags(tpAniSirGlobal mac_ctx, tpDphHashNode sta_ds);
 
 #ifdef WLAN_FEATURE_11AC
 tANI_BOOLEAN limCheckVHTOpModeChange( tpAniSirGlobal pMac, tpPESession psessionEntry,
-                                      tANI_U8 chanWidth, tANI_U8 chanMode, tANI_U8 staId, tANI_U8 *peerMac);
+                                      tANI_U8 chanWidth, tANI_U8 staId, tANI_U8 *peerMac);
 tANI_BOOLEAN limSetNssChange( tpAniSirGlobal pMac, tpPESession psessionEntry,
                               tANI_U8 rxNss, tANI_U8 staId, tANI_U8 *peerMac);
 tANI_BOOLEAN limCheckMembershipUserPosition( tpAniSirGlobal pMac, tpPESession psessionEntry,
                                              tANI_U32 membership, tANI_U32 userPosition,
                                              tANI_U8 staId);
 #endif
+
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
 
 typedef enum
 {
@@ -543,14 +544,8 @@ typedef enum
     WLAN_PE_DIAG_AUTH_TIMEOUT,
 } WLAN_PE_DIAG_EVENT_TYPE;
 
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
 void limDiagEventReport(tpAniSirGlobal pMac, tANI_U16 eventType, tpPESession pSessionEntry, tANI_U16 status, tANI_U16 reasonCode);
-#else
-static inline void limDiagEventReport(tpAniSirGlobal pMac, tANI_U16 eventType,
-			tpPESession pSessionEntry, tANI_U16 status,
-			tANI_U16 reasonCode)
-{
-}
+
 #endif /* FEATURE_WLAN_DIAG_SUPPORT */
 
 void peSetResumeChannel(tpAniSirGlobal pMac, tANI_U16 channel, ePhyChanBondState cbState);
@@ -668,11 +663,10 @@ void lim_update_extcap_struct(tpAniSirGlobal mac_ctx, uint8_t *buf,
 			       tDot11fIEExtCap *ext_cap);
 tSirRetStatus lim_strip_extcap_update_struct(tpAniSirGlobal mac_ctx,
 		uint8_t* addn_ie, uint16_t *addn_ielen, tDot11fIEExtCap *dst);
-void lim_merge_extcap_struct(tDot11fIEExtCap *dst, tDot11fIEExtCap *src,
-			bool add);
+void lim_merge_extcap_struct(tDot11fIEExtCap *dst, tDot11fIEExtCap *src);
 uint8_t
 lim_get_80Mhz_center_channel(uint8_t primary_channel);
-tANI_U8 lim_compute_ext_cap_ie_length (tDot11fIEExtCap *ext_cap);
+bool lim_is_ext_cap_ie_present (struct s_ext_cap *ext_cap);
 bool lim_is_robust_mgmt_action_frame(uint8_t action_catagory);
 void lim_update_caps_info_for_bss(tpAniSirGlobal mac_ctx,
 				uint16_t *caps, uint16_t bss_caps);

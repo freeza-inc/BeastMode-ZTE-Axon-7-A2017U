@@ -42,7 +42,7 @@
 #include "wniApi.h"
 #include "sirCommon.h"
 
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
 #include "pmmApi.h"
 #include "cfgApi.h"
 

@@ -38,7 +38,8 @@
  */
 
 #include "palTypes.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
+
 #include "cfgApi.h"
 #include "pmmApi.h"
 #include "limApi.h"
@@ -347,8 +348,6 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
     tANI_U8  operMode;
     tANI_U8  chWidth = 0;
     tANI_U8  skip_opmode_update = false;
-    WLAN_PHY_MODE chanMode;
-    ePhyChanBondState chanOffset;
 #endif
 #if defined FEATURE_WLAN_ESE || defined WLAN_FEATURE_VOWIFI
      tPowerdBm regMax = 0,maxTxPower = 0;
@@ -502,20 +501,6 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
        if (NULL != pStaDs && (HAL_STA_INVALID_IDX != pStaDs->staIndex ) &&
             (WNI_CFG_CHANNEL_BONDING_MODE_DISABLE != cbMode))
        {
-          if (pBeacon->HTInfo.present && pBeacon->VHTOperation.present) {
-              chanOffset = limGet11ACPhyCBState(pMac,
-                              pBeacon->channelNumber,
-                              pBeacon->HTInfo.secondaryChannelOffset,
-                              pBeacon->VHTOperation.chanCenterFreqSeg1,
-                              psessionEntry);
-              chanMode = wma_chan_to_mode(pBeacon->channelNumber,
-                              chanOffset,
-                              psessionEntry->vhtCapability,
-                              psessionEntry->dot11mode);
-          } else {
-              chanMode = MODE_MAX;
-          }
-
           if (psessionEntry->vhtCapability && pBeacon->OperatingMode.present )
           {
              operMode = pStaDs->vhtSupportedChannelWidthSet ?
@@ -580,7 +565,7 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                       chWidth = eHT_CHANNEL_WIDTH_20MHZ;
                    }
                 limCheckVHTOpModeChange(pMac, psessionEntry,
-                      chWidth, chanMode,
+                      chWidth,
                       pStaDs->staIndex, pMh->sa);
              }
              /* Update Nss setting */
@@ -655,7 +640,7 @@ static void __schBeaconProcessForSession( tpAniSirGlobal      pMac,
                     }
                 }
                 limCheckVHTOpModeChange(pMac, psessionEntry,
-                        chWidth, chanMode, pStaDs->staIndex, pMh->sa);
+                        chWidth, pStaDs->staIndex, pMh->sa);
 
              }
           }

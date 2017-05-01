@@ -556,9 +556,7 @@ eHalStatus PmcOffloadEnableStaModePowerSave(tHalHandle hHal,
                                             tANI_U32 sessionId);
 
 eHalStatus PmcOffloadDisableStaModePowerSave(tHalHandle hHal,
-					     FullPowerReqCb callback_routine,
-					     void *callback_context,
-					     tANI_U32 sessionId);
+                                             tANI_U32 sessionId);
 
 eHalStatus pmcOffloadRequestFullPower(tHalHandle hHal, tANI_U32 sessionId,
                              FullPowerReqCb fullpwrReqCb,void *callbackContext,

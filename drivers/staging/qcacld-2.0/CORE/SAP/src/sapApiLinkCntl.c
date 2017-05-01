@@ -260,7 +260,6 @@ WLANSAP_ScanCallback
          * the result */
         vos_mem_free(psapContext->channelList);
         psapContext->channelList = NULL;
-        psapContext->num_of_channel = 0;
     }
 #endif
 
@@ -479,7 +478,7 @@ WLANSAP_PreStartBssAcsScanCallback
             }
         }
 #else
-        psapContext->channel = sap_select_default_oper_chan_ini(halHandle, 0);
+        psapContext->channel = SAP_DEFAULT_24GHZ_CHANNEL;
 #endif
         else
         {
@@ -502,7 +501,6 @@ WLANSAP_PreStartBssAcsScanCallback
              */
             vos_mem_free(psapContext->channelList);
             psapContext->channelList = NULL;
-            psapContext->num_of_channel = 0;
         }
 #endif
 
@@ -524,10 +522,12 @@ WLANSAP_PreStartBssAcsScanCallback
                    FL("CSR scanStatus = %s (%d), choose default channel"),
                    "eCSR_SCAN_ABORT/FAILURE", scanStatus );
 #ifdef SOFTAP_CHANNEL_RANGE
-        psapContext->channel = sap_select_default_oper_chan_ini(halHandle,
-                                         psapContext->acs_cfg->hw_mode);
+        if(psapContext->acs_cfg->hw_mode == eCSR_DOT11_MODE_11a)
+            psapContext->channel = SAP_DEFAULT_5GHZ_CHANNEL;
+        else
+            psapContext->channel = SAP_DEFAULT_24GHZ_CHANNEL;
 #else
-        psapContext->channel = sap_select_default_oper_chan_ini(halHandle, 0);
+        psapContext->channel = SAP_DEFAULT_24GHZ_CHANNEL;
 #endif
         halStatus = sapSignalHDDevent(psapContext, NULL,
                                       eSAP_ACS_CHANNEL_SELECTED,
@@ -876,7 +876,7 @@ WLANSAP_RoamCallback
             }
             break;
 
-        case eCSR_ROAM_RESULT_DEAUTH_IND:
+	case eCSR_ROAM_RESULT_DEAUTH_IND:
         case eCSR_ROAM_RESULT_DISASSOC_IND:
             VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_HIGH,
                           FL("CSR roamResult = %s (%d)"),

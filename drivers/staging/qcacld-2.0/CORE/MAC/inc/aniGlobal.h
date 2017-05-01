@@ -74,6 +74,7 @@ typedef struct sAniSirGlobal *tpAniSirGlobal;
 #include "smeInternal.h"
 #include "sapApi.h"
 #include "ccmApi.h"
+#include "btcApi.h"
 #include "csrInternal.h"
 
 #ifdef FEATURE_OEM_DATA_SUPPORT
@@ -192,19 +193,6 @@ enum log_event_indicator {
 	WLAN_LOG_INDICATOR_HOST_DRIVER,
 	WLAN_LOG_INDICATOR_FIRMWARE,
 	WLAN_LOG_INDICATOR_HOST_ONLY,
-};
-
-/**
- * enum log_dump_trace_mask - Mask to indicate what traces to log
- * @DUMP_NO_TRACE: Do not dump any logs
- * @DUMP_VOS_TRACE: Dump vos trace logs
- * @DUMP_PACKET_TRACE: Dump packet trace
- *
- */
-enum log_dump_trace_mask {
-	DUMP_NO_TRACE      = 0x0,
-	DUMP_VOS_TRACE     = 0x1,
-	DUMP_PACKET_TRACE  = 0x2
 };
 
 /**
@@ -539,8 +527,6 @@ typedef struct sAniSirLim
     // abort scan is used to abort an on-going scan
     tANI_U8 abortScan;
     tLimScanChnInfo scanChnInfo;
-
-    struct lim_scan_channel_status scan_channel_status;
 
     //////////////////////////////////////     SCAN/LEARN RELATED START ///////////////////////////////////////////
     tSirMacAddr         gSelfMacAddr;   //added for BT-AMP Support
@@ -1143,7 +1129,6 @@ typedef struct sMacOpenParameters
     bool force_target_assert_enabled;
     uint16_t pkt_bundle_timer_value;
     uint16_t pkt_bundle_size;
-    bool bpf_packet_filter_enable;
 
     struct ol_tx_sched_wrr_ac_specs_t ac_specs[OL_TX_NUM_WMM_AC];
 } tMacOpenParameters;
@@ -1214,6 +1199,7 @@ typedef struct sAniSirGlobal
     tOemDataStruct oemData;
 #endif
     tPmcInfo     pmc;
+    tSmeBtcInfo  btc;
 
     tCcm ccm;
 
@@ -1283,9 +1269,6 @@ typedef struct sAniSirGlobal
     int8_t first_scan_bucket_threshold;
     sir_mgmt_frame_ind_callback mgmt_frame_ind_cb;
     sir_p2p_ack_ind_callback p2p_ack_ind_cb;
-    bool snr_monitor_enabled;
-    /* channel information callback */
-    void (*chan_info_cb)(struct scan_chan_info *chan_info);
 } tAniSirGlobal;
 
 typedef enum

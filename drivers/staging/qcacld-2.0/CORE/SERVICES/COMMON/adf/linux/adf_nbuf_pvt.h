@@ -65,6 +65,17 @@ typedef void (*__adf_nbuf_callback_fn) (struct sk_buff *skb);
 #define CVG_NBUF_MAX_EXTRA_FRAGS 2
 
 typedef void (*adf_nbuf_trace_update_t)(char *);
+struct nbuf_rx_cb {
+	uint8_t dp_trace:1,
+		    reserved:7;
+	uint8_t packet_trace;
+};
+
+#define ADF_NBUF_CB_RX_DP_TRACE(skb) \
+	(((struct nbuf_rx_cb*)((skb)->cb))->dp_trace)
+
+#define ADF_NBUF_CB_RX_PACKET_TRACE(skb) \
+	(((struct nbuf_rx_cb*)((skb)->cb))->packet_trace)
 
 struct cvg_nbuf_cb {
     /*
@@ -88,10 +99,10 @@ struct cvg_nbuf_cb {
      * Store info for data path tracing
      */
     struct {
-        uint8_t packet_state:4;
-        uint8_t packet_track:2;
-        uint8_t dp_trace_tx:1;
-        uint8_t dp_trace_rx:1;
+        uint8_t packet_state: 4;
+        uint8_t packet_track: 2;
+        uint8_t dp_trace: 1;
+        uint8_t dp_trace_reserved: 1;
     } trace;
 
     /*
@@ -138,11 +149,9 @@ struct cvg_nbuf_cb {
     unsigned char proto_type;
     unsigned char vdev_id;
 #endif /* QCA_PKT_PROTO_TRACE */
-#ifdef QOS_FWD_SUPPORT
-    unsigned char fwd_flag: 1;
-#endif /* QOS_FWD_SUPPORT */
 #ifdef QCA_TX_HTT2_SUPPORT
     unsigned char tx_htt2_frm: 1;
+    unsigned char tx_htt2_reserved: 7;
 #endif /* QCA_TX_HTT2_SUPPORT */
     struct {
         uint8_t is_eapol: 1;
@@ -200,16 +209,6 @@ struct cvg_nbuf_cb {
 #define NBUF_GET_PROTO_TYPE(skb) 0;
 #endif /* QCA_PKT_PROTO_TRACE */
 
-#ifdef QOS_FWD_SUPPORT
-#define NBUF_SET_FWD_FLAG(skb, flag) \
-    (((struct cvg_nbuf_cb *)((skb)->cb))->fwd_flag = flag)
-#define NBUF_GET_FWD_FLAG(skb) \
-    (((struct cvg_nbuf_cb *)((skb)->cb))->fwd_flag)
-#else
-#define NBUF_SET_FWD_FLAG(skb, fwd_flag);
-#define NBUF_GET_FWD_FLAG(skb) 0;
-#endif /* QOS_FWD_SUPPORT */
-
 #ifdef QCA_TX_HTT2_SUPPORT
 #define NBUF_SET_TX_HTT2_FRM(skb, candi) \
     (((struct cvg_nbuf_cb *)((skb)->cb))->tx_htt2_frm = candi)
@@ -260,10 +259,7 @@ struct cvg_nbuf_cb {
     adf_nbuf_set_state(skb, PACKET_STATE)
 
 #define ADF_NBUF_CB_TX_DP_TRACE(skb) \
-    (((struct cvg_nbuf_cb *)((skb)->cb))->trace.dp_trace_tx)
-
-#define ADF_NBUF_CB_RX_DP_TRACE(skb) \
-    (((struct cvg_nbuf_cb *)((skb)->cb))->trace.dp_trace_rx)
+    (((struct cvg_nbuf_cb *)((skb)->cb))->trace.dp_trace)
 
 #define ADF_NBUF_GET_IS_EAPOL(skb) \
     (((struct cvg_nbuf_cb *)((skb)->cb))->packet_type.is_eapol)
@@ -337,11 +333,6 @@ struct cvg_nbuf_cb {
 #define __adf_nbuf_trace_get_proto_type(skb) \
     NBUF_GET_PROTO_TYPE(skb);
 
-#define __adf_nbuf_set_fwd_flag(skb, flag) \
-    NBUF_SET_FWD_FLAG(skb, flag)
-#define __adf_nbuf_get_fwd_flag(skb) \
-    NBUF_GET_FWD_FLAG(skb);
-
 typedef struct __adf_nbuf_qhead {
     struct sk_buff   *head;
     struct sk_buff   *tail;
@@ -407,8 +398,8 @@ bool            __adf_nbuf_data_is_ipv4_udp_pkt(uint8_t *data);
 bool            __adf_nbuf_data_is_ipv4_tcp_pkt(uint8_t *data);
 bool            __adf_nbuf_data_is_ipv6_udp_pkt(uint8_t *data);
 bool            __adf_nbuf_data_is_ipv6_tcp_pkt(uint8_t *data);
-bool            __adf_nbuf_data_is_dhcp_pkt(uint8_t *data);
-bool            __adf_nbuf_data_is_eapol_pkt(uint8_t *data);
+a_status_t      __adf_nbuf_data_is_dhcp_pkt(uint8_t *data);
+a_status_t      __adf_nbuf_data_is_eapol_pkt(uint8_t *data);
 bool            __adf_nbuf_data_is_ipv4_arp_pkt(uint8_t *data);
 enum adf_proto_subtype  __adf_nbuf_data_get_dhcp_subtype(uint8_t *data);
 enum adf_proto_subtype  __adf_nbuf_data_get_eapol_subtype(uint8_t *data);
@@ -1208,21 +1199,6 @@ __adf_nbuf_append_ext_list(
         skb_shinfo(skb_head)->frag_list = ext_list;
         skb_head->data_len = ext_len;
         skb_head->len += skb_head->data_len;
-}
-
-/**
- * __adf_nbuf_get_ext_list() - Get the link to extended nbuf list.
- * @head_buf: Network buf holding head segment (single)
- *
- * This ext_list is populated when we have Jumbo packet, for example in case of
- * monitor mode amsdu packet reception, and are stiched using frags_list.
- *
- * Return: Network buf list holding linked extensions from head buf.
- */
-static inline struct sk_buff *
-__adf_nbuf_get_ext_list(struct sk_buff *head_buf)
-{
-	return skb_shinfo(head_buf)->frag_list;
 }
 
 static inline void

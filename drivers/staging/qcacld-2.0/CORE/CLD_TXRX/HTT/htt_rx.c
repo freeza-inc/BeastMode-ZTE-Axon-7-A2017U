@@ -1859,8 +1859,8 @@ htt_rx_amsdu_rx_in_order_pop_ll(
                                  *(u_int32_t *)rx_ind_data);
     peer = ol_txrx_peer_find_by_id(pdev->txrx_pdev, peer_id);
     if (!peer)
-        adf_os_print(KERN_DEBUG "%s: invalid peer id %d and msdu count %d\n",
-                     __func__, peer_id, msdu_count);
+        adf_os_print("%s: invalid peer id %d and msdu count %d\n", __func__,
+                     peer_id, msdu_count);
 
     msg_word = (u_int32_t *)(rx_ind_data + HTT_RX_IN_ORD_PADDR_IND_HDR_BYTES);
     if (offload_ind) {
@@ -1903,7 +1903,7 @@ htt_rx_amsdu_rx_in_order_pop_ll(
         adf_nbuf_pull_head(msdu, HTT_RX_STD_DESC_RESERVATION);
 
         adf_dp_trace_set_track(msdu, ADF_RX);
-        NBUF_SET_PACKET_TRACK(msdu, NBUF_TX_PKT_DATA_TRACK);
+        ADF_NBUF_CB_RX_PACKET_TRACE(msdu) = NBUF_TX_PKT_DATA_TRACK;
         ol_rx_log_packet(pdev, peer_id, msdu);
         DPTRACE(adf_dp_trace(msdu,
                 ADF_DP_TRACE_RX_HTT_PACKET_PTR_RECORD,

@@ -38,7 +38,7 @@
  */
 
 #include "aniGlobal.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
 #include "cfgApi.h"
 
 
@@ -401,9 +401,7 @@ limTearDownLinkWithAp(tpAniSirGlobal pMac, tANI_U8 sessionId, tSirMacReasonCodes
         mlmDeauthInd.reasonCode    = (tANI_U8) pStaDs->mlmStaContext.disassocReason;
         mlmDeauthInd.deauthTrigger =  pStaDs->mlmStaContext.cleanupTrigger;
 
-        if (GET_LIM_SYSTEM_ROLE(psessionEntry) == eLIM_STA_ROLE)
-            limPostSmeMessage(pMac, LIM_MLM_DEAUTH_IND,
-                                    (tANI_U32 *) &mlmDeauthInd);
+        limPostSmeMessage(pMac, LIM_MLM_DEAUTH_IND, (tANI_U32 *) &mlmDeauthInd);
 
         limSendSmeDeauthInd(pMac, pStaDs, psessionEntry);
         limReInitScanResults(pMac);
@@ -467,19 +465,11 @@ void limHandleHeartBeatFailure(tpAniSirGlobal pMac,tpPESession psessionEntry)
     {
         if (!pMac->sys.gSysEnableLinkMonitorMode)
             return;
-        /* Ignore HB if channel switch is in progress */
-        if (psessionEntry->gLimSpecMgmt.dot11hChanSwState ==
-                          eLIM_11H_CHANSW_RUNNING) {
-           limLog(pMac, LOGE,
-               FL("Ignore Heartbeat failure as Channel switch is in progress"));
-           pMac->pmm.inMissedBeaconScenario = false;
-           return;
-        }
 
         /**
          * Beacon frame not received within heartbeat timeout.
          */
-        limLog(pMac, LOGW, FL("Heartbeat Failure"));
+        PELOGW(limLog(pMac, LOGW, FL("Heartbeat Failure"));)
         pMac->lim.gLimHBfailureCntInLinkEstState++;
 
         /**
