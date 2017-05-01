@@ -57,6 +57,7 @@
 #define VOS_PKT_TRAC_DHCP_SRV_PORT   67
 #define VOS_PKT_TRAC_DHCP_CLI_PORT   68
 #define VOS_PKT_TRAC_EAPOL_ETH_TYPE  0x888E
+#define VOS_PKT_TRAC_ARP_ETH_TYPE    0x0806
 #ifdef QCA_PKT_PROTO_TRACE
 #define VOS_PKT_TRAC_MAX_STRING_LEN  40
 #define VOS_PKT_TRAC_MAX_TRACE_BUF   50
@@ -73,6 +74,7 @@ typedef struct
 
 vos_pkt_proto_trace_t   *trace_buffer = NULL;
 unsigned int            trace_buffer_order = 0;
+unsigned int trace_dump_order = 0;
 spinlock_t              trace_buffer_lock;
 #endif /* QCA_PKT_PROTO_TRACE */
 
@@ -256,14 +258,11 @@ v_U8_t vos_pkt_get_proto_type
 )
 {
    v_U8_t     pkt_proto_type = 0;
-   v_U16_t    ether_type;
-   v_U16_t    SPort;
-   v_U16_t    DPort;
 
    if (dot11_type)
    {
       if (dot11_type == (VOS_PKT_TRAC_TYPE_MGMT_ACTION & tracking_map))
-         pkt_proto_type |= VOS_PKT_TRAC_TYPE_MGMT_ACTION;
+         pkt_proto_type = VOS_PKT_TRAC_TYPE_MGMT_ACTION;
 
       /* Protocol type map */
       return pkt_proto_type;
@@ -272,26 +271,48 @@ v_U8_t vos_pkt_get_proto_type
    /* EAPOL Tracking enabled */
    if (VOS_PKT_TRAC_TYPE_EAPOL & tracking_map)
    {
-      ether_type = (v_U16_t)(*(v_U16_t *)(skb->data + VOS_PKT_TRAC_ETH_TYPE_OFFSET));
-      if (VOS_PKT_TRAC_EAPOL_ETH_TYPE == VOS_SWAP_U16(ether_type))
-      {
-         pkt_proto_type |= VOS_PKT_TRAC_TYPE_EAPOL;
+      if (adf_nbuf_is_eapol_pkt(skb)) {
+         pkt_proto_type = VOS_PKT_TRAC_TYPE_EAPOL;
+         return pkt_proto_type;
       }
    }
 
    /* DHCP Tracking enabled */
    if (VOS_PKT_TRAC_TYPE_DHCP & tracking_map)
    {
-      SPort = (v_U16_t)(*(v_U16_t *)(skb->data + VOS_PKT_TRAC_IP_OFFSET +
-                                     VOS_PKT_TRAC_IP_HEADER_SIZE));
-      DPort = (v_U16_t)(*(v_U16_t *)(skb->data + VOS_PKT_TRAC_IP_OFFSET +
-                                     VOS_PKT_TRAC_IP_HEADER_SIZE + sizeof(v_U16_t)));
-      if (((VOS_PKT_TRAC_DHCP_SRV_PORT == VOS_SWAP_U16(SPort)) &&
-           (VOS_PKT_TRAC_DHCP_CLI_PORT == VOS_SWAP_U16(DPort))) ||
-          ((VOS_PKT_TRAC_DHCP_CLI_PORT == VOS_SWAP_U16(SPort)) &&
-           (VOS_PKT_TRAC_DHCP_SRV_PORT == VOS_SWAP_U16(DPort))))
-      {
-         pkt_proto_type |= VOS_PKT_TRAC_TYPE_DHCP;
+      if (adf_nbuf_is_dhcp_pkt(skb)) {
+         pkt_proto_type = VOS_PKT_TRAC_TYPE_DHCP;
+         return pkt_proto_type;
+      }
+   }
+
+   /* ARP Tracking enabled */
+   if (VOS_PKT_TRAC_TYPE_ARP & tracking_map) {
+      if (adf_nbuf_is_ipv4_arp_pkt(skb)) {
+          pkt_proto_type = VOS_PKT_TRAC_TYPE_ARP;
+          return pkt_proto_type;
+      }
+   }
+
+   /* IPV6 NS Tracking enabled */
+   if (VOS_PKT_TRAC_TYPE_NS & tracking_map) {
+      if (adf_nbuf_is_icmpv6_pkt(skb)) {
+          if (adf_nbuf_get_icmpv6_subtype(skb) ==
+                   ADF_PROTO_ICMPV6_NS) {
+              pkt_proto_type = VOS_PKT_TRAC_TYPE_NS;
+              return pkt_proto_type;
+          }
+      }
+   }
+
+   /* IPV6 NA Tracking enabled */
+   if (VOS_PKT_TRAC_TYPE_NA & tracking_map) {
+      if (adf_nbuf_is_icmpv6_pkt(skb)) {
+          if (adf_nbuf_get_icmpv6_subtype(skb) ==
+                   ADF_PROTO_ICMPV6_NA) {
+              pkt_proto_type = VOS_PKT_TRAC_TYPE_NA;
+              return pkt_proto_type;
+          }
       }
    }
 
@@ -314,91 +335,95 @@ void vos_pkt_trace_buf_update
 
    VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
              "%s %d, %s", __func__, __LINE__, event_string);
-   spin_lock_bh(&trace_buffer_lock);
 
    if (!trace_buffer) {
       VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
                 "trace_buffer is already free");
-      spin_unlock_bh(&trace_buffer_lock);
       return;
    }
 
+   spin_lock_bh(&trace_buffer_lock);
    slot = trace_buffer_order % VOS_PKT_TRAC_MAX_TRACE_BUF;
    trace_buffer[slot].order = trace_buffer_order;
+   trace_buffer_order++;
+   spin_unlock_bh(&trace_buffer_lock);
    do_gettimeofday(&tv);
    trace_buffer[slot].event_sec_time = tv.tv_sec;
    trace_buffer[slot].event_msec_time = tv.tv_usec;
-   strncpy(trace_buffer[slot].event_string, event_string,
-          (sizeof(trace_buffer[slot].event_string) < strlen(event_string)?
-           sizeof(trace_buffer[slot].event_string) : strlen(event_string)));
-   trace_buffer_order++;
-   spin_unlock_bh(&trace_buffer_lock);
+   strlcpy(trace_buffer[slot].event_string, event_string,
+          sizeof(trace_buffer[slot].event_string));
 
    return;
 }
 
 /**
+ * vos_pkt_trace_dump_slot_buf() - Helper function to dump pkt trace
+ * @slot: index
+ *
+ * Return: none
+ */
+void vos_pkt_trace_dump_slot_buf(int slot)
+{
+	struct rtc_time tm;
+	unsigned long local_time;
+
+	local_time = (u32)(trace_buffer[slot].event_sec_time -
+		(sys_tz.tz_minuteswest * 60));
+	rtc_time_to_tm(local_time, &tm);
+	VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		"%5d : [%02d:%02d:%02d.%06lu] : %s",
+		trace_buffer[slot].order,
+		tm.tm_hour, tm.tm_min, tm.tm_sec,
+		trace_buffer[slot].event_sec_time,
+		trace_buffer[slot].event_string);
+}
+
+/**
  * vos_pkt_trace_buf_dump - Dump stored information into kernel log
  */
-void vos_pkt_trace_buf_dump
-(
-   void
-)
+void vos_pkt_trace_buf_dump(void)
 {
-   v_U32_t slot, idx;
-   struct rtc_time tm;
-   unsigned long local_time;
+	uint32_t i, latest_idx = trace_buffer_order;
+	int slot;
 
-   spin_lock_bh(&trace_buffer_lock);
-   if (!trace_buffer) {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO,
-                "trace_buffer is already free");
-      spin_unlock_bh(&trace_buffer_lock);
-      return;
-   }
-   VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
-             "PACKET TRACE DUMP START Current Timestamp %u",
-              (unsigned int)vos_timer_get_system_time());
-   VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
-             "ORDER :          RTC TIME :    EVT");
+	if (!trace_buffer || !latest_idx) {
+		VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
+                "trace_buffer is already free trace_buffer_order: %d",
+		trace_buffer_order);
+		return;
+	}
+	VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		"PACKET TRACE DUMP START Current Timestamp %u",
+		(unsigned int)vos_timer_get_system_time());
+	VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+		"ORDER :          RTC TIME :    EVT");
 
-   if (VOS_PKT_TRAC_MAX_TRACE_BUF > trace_buffer_order)
-   {
-      for (slot = 0 ; slot < trace_buffer_order; slot++)
-      {
-         local_time = (u32)(trace_buffer[slot].event_sec_time -
-                         (sys_tz.tz_minuteswest * 60));
-         rtc_time_to_tm(local_time, &tm);
-         VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
-                   "%5d : [%02d:%02d:%02d.%06lu] : %s",
-                   trace_buffer[slot].order,
-                   tm.tm_hour, tm.tm_min, tm.tm_sec,
-                   trace_buffer[slot].event_sec_time,
-                   trace_buffer[slot].event_string);
-      }
-   }
-   else
-   {
-      for (idx = 0 ; idx < VOS_PKT_TRAC_MAX_TRACE_BUF; idx++)
-      {
-         slot = (trace_buffer_order + idx) % VOS_PKT_TRAC_MAX_TRACE_BUF;
-         local_time = (u32)(trace_buffer[slot].event_sec_time -
-                         (sys_tz.tz_minuteswest * 60));
-         rtc_time_to_tm(local_time, &tm);
-         VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
-                   "%5d : [%02d:%02d:%02d.%06lu] : %s",
-                   trace_buffer[slot].order,
-                   tm.tm_hour, tm.tm_min, tm.tm_sec,
-                   trace_buffer[slot].event_sec_time,
-                   trace_buffer[slot].event_string);
-      }
-   }
+	if (VOS_PKT_TRAC_MAX_TRACE_BUF > latest_idx) {
+		/*
+		 * Scenario: Number of trace records less than MAX,
+		 * Circular buffer not overwritten.
+		 */
+		for (slot = latest_idx - 1; slot >= 0 &&
+		     slot > trace_dump_order; slot--)
+			vos_pkt_trace_dump_slot_buf(slot);
+	} else {
+		/*
+		 * Scenario: Number of trace records exceeded MAX,
+		 * Circular buffer is overwritten.
+		 */
+		for (i = 0; (i < VOS_PKT_TRAC_MAX_TRACE_BUF) &&
+		     (latest_idx - i - 1 > trace_dump_order); i++) {
+			slot = ((latest_idx - i - 1) %
+				VOS_PKT_TRAC_MAX_TRACE_BUF);
+			vos_pkt_trace_dump_slot_buf(slot);
+		}
+	}
 
-   VOS_TRACE(VOS_MODULE_ID_SYS, VOS_TRACE_LEVEL_INFO,
-             "PACKET TRACE DUMP END");
-   spin_unlock_bh(&trace_buffer_lock);
+	trace_dump_order = latest_idx - 1;
+	VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
+			"PACKET TRACE DUMP END");
 
-   return;
+	return;
 }
 
 /**

@@ -91,7 +91,6 @@
 #include "vos_api.h"
 #include "sirDebug.h"
 
-#define ATH_SUPPORT_DFS   1
 #define CHANNEL_TURBO     0x00010
 #define DFS_PRINTK(_fmt, ...) printk((_fmt), __VA_ARGS__)
 #define DFS_DPRINTK(dfs, _m, _fmt, ...) do {             \
@@ -129,7 +128,7 @@
 //#define MAX_BIN5_DUR  131 /* 105 * 1.25*/
 #define MAX_BIN5_DUR  145   /* use 145 for osprey */ //conversion is already done using dfs->dur_multiplier//
 #define MAX_BIN5_DUR_MICROSEC 105
-#define MAX_DFS_RADAR_TYPE 256
+#define MAX_DFS_RADAR_TABLE_TYPE 256
 
 #define DFS_MARGIN_EQUAL(a, b, margin) ((DFS_DIFF(a,b)) <= margin)
 #define DFS_MAX_STAGGERED_BURSTS 3

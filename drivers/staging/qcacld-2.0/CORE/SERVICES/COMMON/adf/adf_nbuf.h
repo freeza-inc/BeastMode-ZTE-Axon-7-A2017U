@@ -53,9 +53,12 @@
 #define NBUF_PKT_TRAC_TYPE_DHCP    0x04
 #define NBUF_PKT_TRAC_TYPE_MGMT_ACTION    0x08
 #define NBUF_PKT_TRAC_TYPE_ARP     0x10
+#define NBUF_PKT_TRAC_TYPE_NS      0x20
+#define NBUF_PKT_TRAC_TYPE_NA      0x40
 #define NBUF_PKT_TRAC_MAX_STRING   12
 #define NBUF_PKT_TRAC_PROTO_STRING 4
 #define ADF_NBUF_PKT_ERROR         1
+#define ADF_NBUF_FWD_FLAG          1
 
 #define ADF_NBUF_TRAC_IPV4_OFFSET       14
 #define ADF_NBUF_TRAC_IPV4_HEADER_SIZE  20
@@ -175,7 +178,8 @@ struct mon_rx_status {
 #define ICMPV6_SUBTYPE_OFFSET         54
 #define ICMPV6_REQUEST                0x80
 #define ICMPV6_RESPONSE               0x81
-
+#define ICMPV6_NS                     0x87
+#define ICMPV6_NA                     0x88
 #define ADF_NBUF_IPA_CHECK_MASK       0x80000000
 
 enum adf_proto_type {
@@ -206,6 +210,8 @@ enum adf_proto_subtype {
 	ADF_PROTO_ICMP_RES,
 	ADF_PROTO_ICMPV6_REQ,
 	ADF_PROTO_ICMPV6_RES,
+	ADF_PROTO_ICMPV6_NS,
+	ADF_PROTO_ICMPV6_NA,
 	ADF_PROTO_IPV4_UDP,
 	ADF_PROTO_IPV4_TCP,
 	ADF_PROTO_IPV6_UDP,
@@ -405,7 +411,49 @@ adf_nbuf_dmamap_info(adf_os_dma_map_t bmap, adf_os_dmamap_info_t *sg)
     __adf_nbuf_dmamap_info(bmap, sg);
 }
 
+#ifdef MEMORY_DEBUG
+void adf_net_buf_debug_init(void);
+void adf_net_buf_debug_exit(void);
+void adf_net_buf_debug_clean(void);
+void adf_net_buf_debug_add_node(adf_nbuf_t net_buf, size_t size,
+			uint8_t *file_name, uint32_t line_num);
+void adf_net_buf_debug_delete_node(adf_nbuf_t net_buf);
+void adf_net_buf_debug_release_skb(adf_nbuf_t net_buf);
 
+/* nbuf allocation routines */
+
+#define adf_nbuf_alloc(d, s, r, a, p)			\
+	adf_nbuf_alloc_debug(d, s, r, a, p, __FILE__, __LINE__)
+static inline adf_nbuf_t
+adf_nbuf_alloc_debug(adf_os_device_t osdev, adf_os_size_t size, int reserve,
+		int align, int prio, uint8_t *file_name,
+		uint32_t line_num)
+{
+	adf_nbuf_t net_buf;
+	net_buf = __adf_nbuf_alloc(osdev, size, reserve, align, prio);
+
+	/* Store SKB in internal ADF tracking table */
+	if (adf_os_likely(net_buf))
+		adf_net_buf_debug_add_node(net_buf, size, file_name, line_num);
+
+	return net_buf;
+}
+
+static inline void adf_nbuf_free(adf_nbuf_t net_buf)
+{
+	/* Remove SKB from internal ADF tracking table */
+	if (adf_os_likely(net_buf))
+		adf_net_buf_debug_delete_node(net_buf);
+
+	__adf_nbuf_free(net_buf);
+}
+
+#else
+
+static inline void adf_net_buf_debug_release_skb(adf_nbuf_t net_buf)
+{
+	return;
+}
 
 /*
  * nbuf allocation rouines
@@ -474,6 +522,8 @@ adf_nbuf_free(adf_nbuf_t buf)
 {
     __adf_nbuf_free(buf);
 }
+
+#endif
 
 /**
  * @brief Free adf_nbuf
@@ -1108,6 +1158,20 @@ adf_nbuf_append_ext_list(adf_nbuf_t head_buf, adf_nbuf_t ext_list,
 }
 
 /**
+ * adf_nbuf_get_ext_list() - Get the link to extended nbuf list.
+ * @head_buf: Network buf holding head segment (single)
+ *
+ * This ext_list is populated when we have Jumbo packet, for example in case of
+ * monitor mode amsdu packet reception, and are stiched using frags_list.
+ *
+ * Return: Network buf list holding linked extensions from head buf.
+ */
+static inline adf_nbuf_t adf_nbuf_get_ext_list(adf_nbuf_t head_buf)
+{
+	return (adf_nbuf_t)__adf_nbuf_get_ext_list(head_buf);
+}
+
+/**
  * @brief Gets the tx checksumming to be performed on this buf
  *
  * @param[in]  buf       buffer
@@ -1281,6 +1345,52 @@ adf_nbuf_trace_set_proto_type(adf_nbuf_t buf, uint8_t proto_type)
 {
    __adf_nbuf_trace_set_proto_type(buf, proto_type);
 }
+
+/**
+ * adf_nbuf_get_fwd_flag() - get packet forwarding flag
+ * @buf: pointer to adf_nbuf_t structure
+ *
+ * Returns: packet forwarding flag
+*/
+static inline uint8_t
+adf_nbuf_get_fwd_flag(adf_nbuf_t buf)
+{
+   return __adf_nbuf_get_fwd_flag(buf);
+}
+
+/**
+ * adf_nbuf_get_fwd_flag() - update packet forwarding flag
+ * @buf: pointer to adf_nbuf_t structure
+ * @flag: forwarding flag
+ *
+ * Returns: none
+*/
+static inline void
+adf_nbuf_set_fwd_flag(adf_nbuf_t buf, uint8_t flag)
+{
+   __adf_nbuf_set_fwd_flag(buf, flag);
+}
+
+/**
+ * adf_nbuf_is_ipa_nbuf() - Check if frame owner is IPA
+ * @skb: Pointer to skb
+ *
+ * Returns: TRUE if the owner is IPA else FALSE
+ *
+ */
+#if (defined(QCA_MDM_DEVICE) && defined(IPA_OFFLOAD))
+static inline bool
+adf_nbuf_is_ipa_nbuf(adf_nbuf_t buf)
+{
+    return (NBUF_OWNER_ID(buf) == IPA_NBUF_OWNER_ID);
+}
+#else
+static inline bool
+adf_nbuf_is_ipa_nbuf(adf_nbuf_t buf)
+{
+    return false;
+}
+#endif /* QCA_MDM_DEVICE && IPA_OFFLOAD*/
 
 /**
  * @brief This function registers protocol trace callback
@@ -1518,11 +1628,11 @@ adf_nbuf_data_get_ipv6_proto(uint8_t *data)
  *
  * This func. checks whether it is a DHCP packet or not.
  *
- * Return: A_STATUS_OK if it is a DHCP packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a DHCP packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
+static inline
+bool adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
 {
 	return __adf_nbuf_data_is_dhcp_pkt(adf_nbuf_data(buf));
 }
@@ -1533,11 +1643,11 @@ adf_nbuf_is_dhcp_pkt(adf_nbuf_t buf)
  *
  * This func. checks whether it is a DHCP packet or not.
  *
- * Return: A_STATUS_OK if it is a DHCP packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a DHCP packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
+static inline
+bool adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
 {
 	return __adf_nbuf_data_is_dhcp_pkt(data);
 }
@@ -1548,11 +1658,11 @@ adf_nbuf_data_is_dhcp_pkt(uint8_t *data)
  *
  * This func. checks whether it is a EAPOL packet or not.
  *
- * Return: A_STATUS_OK if it is a EAPOL packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a EAPOL packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
+static inline
+bool adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
 {
 	return __adf_nbuf_data_is_eapol_pkt(adf_nbuf_data(buf));
 }
@@ -1563,11 +1673,11 @@ adf_nbuf_is_eapol_pkt(adf_nbuf_t buf)
  *
  * This func. checks whether it is a EAPOL packet or not.
  *
- * Return: A_STATUS_OK if it is a EAPOL packet
- *         A_STATUS_FAILED if not
+ * Return: TRUE if it is a EAPOL packet
+ *         FALSE if not
  */
-static inline a_status_t
-adf_nbuf_data_is_eapol_pkt(uint8_t *data)
+static inline
+bool adf_nbuf_data_is_eapol_pkt(uint8_t *data)
 {
 	return __adf_nbuf_data_is_eapol_pkt(data);
 }

@@ -249,19 +249,6 @@ VOS_STATUS sme_ndp_end_req_handler(tHalHandle hal, struct ndp_end_req *req)
 }
 
 /**
- * sme_ndp_sched_req_handler() - ndp schedule request handler
- * @session_id: session id over which the ndp is being created
- * @req_params: request parameters
- *
- * Return: VOS_STATUS_SUCCESS on success; error number otherwise
- */
-VOS_STATUS sme_ndp_sched_req_handler(uint32_t session_id,
-	struct ndp_schedule_update_req *req_params)
-{
-	return VOS_STATUS_SUCCESS;
-}
-
-/**
  * csr_roam_start_ndi() - Start connection for NaN data path
  * @mac_ctx: Global MAC context
  * @session: SME session ID
@@ -375,6 +362,7 @@ void csr_roam_update_ndp_return_params(tpAniSirGlobal mac_ctx,
 	switch (result) {
 	case eCsrStartBssSuccess:
 		roam_info->ndp.ndi_create_params.reason = 0;
+		roam_info->ndp.ndi_create_params.sta_id = roam_info->staId;
 		roam_info->ndp.ndi_create_params.status =
 					NDP_RSP_STATUS_SUCCESS;
 		*roam_status = eCSR_ROAM_NDP_STATUS_UPDATE;

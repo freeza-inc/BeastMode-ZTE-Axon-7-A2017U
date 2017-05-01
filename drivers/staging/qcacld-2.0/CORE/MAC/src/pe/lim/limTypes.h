@@ -773,12 +773,6 @@ void limSetChannel(tpAniSirGlobal pMac, tANI_U8 channel, tANI_U8 secChannelOffse
 /// Function that completes channel scan
 void limCompleteMlmScan(tpAniSirGlobal, tSirResultCodes);
 
-#ifdef FEATURE_OEM_DATA_SUPPORT
-/* Function that sets system into meas mode for oem data req */
-void limSetOemDataReqMode(tpAniSirGlobal pMac, eHalStatus status, tANI_U32* data);
-#endif
-
-
 /// Function that sends TPC Request action frame
 void limSendTpcRequestFrame(tpAniSirGlobal, tSirMacAddr, tpPESession psessionEntry);
 
@@ -1093,6 +1087,7 @@ typedef struct sSetLinkCbackParams
 #endif
 
 void limProcessRxScanEvent(tpAniSirGlobal mac, void *buf);
+void lim_process_rx_channel_status_event(tpAniSirGlobal mac_ctx, void *buf);
 
 int limProcessRemainOnChnlReq(tpAniSirGlobal pMac, tANI_U32 *pMsg);
 void limRemainOnChnRsp(tpAniSirGlobal pMac, eHalStatus status, tANI_U32 *data);

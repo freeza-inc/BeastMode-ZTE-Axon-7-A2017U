@@ -294,6 +294,9 @@ static const t_probeTime_dwellTime
 #define WMA_EXTSCAN_BURST_DURATION      150
 #endif
 
+#define WMA_CHAN_START_RESP         0
+#define WMA_CHAN_END_RESP           1
+
 typedef void (*txFailIndCallback)(u_int8_t *peer_mac, u_int8_t seqNo);
 
 typedef struct {
@@ -596,6 +599,10 @@ struct wma_txrx_node {
 	v_BOOL_t vdev_up;
 	u_int64_t tsfadjust;
 	void     *addBssStaContext;
+	/* Have a back up of arp offload req */
+	tSirHostOffloadReq arp_offload_req;
+	/* tSirHostOffloadReq of ns offload req */
+	tSirHostOffloadReq ns_offload_req;
 	tANI_U8 aid;
 	/* Robust Management Frame (RMF) enabled/disabled */
 	tANI_U8 rmfEnabled;
@@ -789,10 +796,6 @@ typedef struct wma_handle {
 	u_int8_t no_of_suspend_ind;
 	u_int8_t no_of_resume_ind;
 
-	/* Have a back up of arp info to send along
-	 * with ns info suppose if ns also enabled
-	 */
-	tSirHostOffloadReq mArpInfo;
 	struct wma_tx_ack_work_ctx *ack_work_ctx;
 	u_int8_t powersave_mode;
 	v_BOOL_t ptrn_match_enable_all_vdev;
@@ -922,6 +925,7 @@ typedef struct wma_handle {
 	struct wma_runtime_pm_context runtime_context;
 	uint32_t fine_time_measurement_cap;
 	bool bpf_enabled;
+	bool bpf_packet_filter_enable;
 	bool pause_other_vdev_on_mcc_start;
 
 	/* NAN datapath support enabled in firmware */
@@ -1790,6 +1794,7 @@ uint32_t wma_get_vht_ch_width(void);
 VOS_STATUS wma_get_wakelock_stats(struct sir_wake_lock_stats *wake_lock_stats);
 VOS_STATUS wma_set_tx_rx_aggregation_size
 	(struct sir_set_tx_rx_aggregation_size *tx_rx_aggregation_size);
+VOS_STATUS wma_set_powersave_config(uint8_t val);
 
 /**
  * wma_find_vdev_by_id() - Find vdev handle for given vdev id.
