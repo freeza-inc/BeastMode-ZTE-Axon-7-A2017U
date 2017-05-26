@@ -106,3 +106,4 @@ drivers/soc/qcom/vendor
 include/soc/qcom/vendor
 out
 outENF
+outPERM
