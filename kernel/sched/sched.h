@@ -117,11 +117,6 @@ static inline int task_has_dl_policy(struct task_struct *p)
 	return dl_policy(p->policy);
 }
 
-static inline bool dl_time_before(u64 a, u64 b)
-{
-	return (s64)(a - b) < 0;
-}
-
 /*
  * Tells if entity @a should preempt entity @b.
  */
@@ -681,9 +676,10 @@ struct rq {
 
 	unsigned long cpu_capacity;
 
+	struct callback_head *balance_callback;
+
 	unsigned char idle_balance;
 	/* For active balancing */
-	int post_schedule;
 	int active_balance;
 	int push_cpu;
 	struct task_struct *push_task;
@@ -817,6 +813,21 @@ extern int migrate_swap(struct task_struct *, struct task_struct *);
 #endif /* CONFIG_NUMA_BALANCING */
 
 #ifdef CONFIG_SMP
+
+static inline void
+queue_balance_callback(struct rq *rq,
+		       struct callback_head *head,
+		       void (*func)(struct rq *rq))
+{
+	lockdep_assert_held(&rq->lock);
+
+	if (unlikely(head->next))
+		return;
+
+	head->func = (void (*)(struct callback_head *))func;
+	head->next = rq->balance_callback;
+	rq->balance_callback = head;
+}
 
 extern void sched_ttwu_pending(void);
 
@@ -1671,18 +1682,42 @@ static const u32 prio_to_wmult[40] = {
  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
 };
 
-#define ENQUEUE_WAKEUP		1
-#define ENQUEUE_HEAD		2
-#ifdef CONFIG_SMP
-#define ENQUEUE_WAKING		4	/* sched_class::task_waking was called */
-#else
-#define ENQUEUE_WAKING		0
-#endif
-#define ENQUEUE_REPLENISH	8
-#define ENQUEUE_MIGRATING	16
+/*
+ * {de,en}queue flags:
+ *
+ * DEQUEUE_SLEEP  - task is no longer runnable
+ * ENQUEUE_WAKEUP - task just became runnable
+ *
+ * SAVE/RESTORE - an otherwise spurious dequeue/enqueue, done to ensure tasks
+ *                are in a known state which allows modification. Such pairs
+ *                should preserve as much state as possible.
+ *
+ * MOVE - paired with SAVE/RESTORE, explicitly does not preserve the location
+ *        in the runqueue.
+ *
+ * ENQUEUE_HEAD      - place at front of runqueue (tail if not specified)
+ * ENQUEUE_REPLENISH - CBS (replenish runtime and postpone deadline)
+ * ENQUEUE_WAKING    - sched_class::task_waking was called
+ *
+ */
 
-#define DEQUEUE_SLEEP		1
-#define DEQUEUE_MIGRATING	2
+#define DEQUEUE_SLEEP		0x01
+#define DEQUEUE_SAVE		0x02 /* matches ENQUEUE_RESTORE */
+#define DEQUEUE_MOVE		0x04 /* matches ENQUEUE_MOVE */
+#define DEQUEUE_MIGRATING	0x08
+
+#define ENQUEUE_WAKEUP		0x01
+#define ENQUEUE_RESTORE		0x02
+#define ENQUEUE_MOVE		0x04
+
+#define ENQUEUE_HEAD		0x08
+#define ENQUEUE_REPLENISH	0x10
+#ifdef CONFIG_SMP
+#define ENQUEUE_WAKING		0x20
+#else
+#define ENQUEUE_WAKING		0x00
+#endif
+#define ENQUEUE_MIGRATING	0x40
 
 #define RETRY_TASK		((void *)-1UL)
 
@@ -1712,7 +1747,6 @@ struct sched_class {
 	int  (*select_task_rq)(struct task_struct *p, int task_cpu, int sd_flag, int flags);
 	void (*migrate_task_rq)(struct task_struct *p, int next_cpu);
 
-	void (*post_schedule) (struct rq *this_rq);
 	void (*task_waking) (struct task_struct *task);
 	void (*task_woken) (struct rq *this_rq, struct task_struct *task);
 
@@ -2183,4 +2217,10 @@ static inline u64 irq_time_read(int cpu)
 }
 #endif /* CONFIG_64BIT */
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
+
+/*
+ * task_may_not_preempt - check whether a task may not be preemptible soon
+ */
+extern bool task_may_not_preempt(struct task_struct *task, int cpu);
+
 #endif /* CONFIG_SCHED_QHMP */

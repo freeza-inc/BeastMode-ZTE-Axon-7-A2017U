@@ -348,6 +348,9 @@ extern void show_regs(struct pt_regs *);
  */
 extern void show_stack(struct task_struct *task, unsigned long *sp);
 
+void io_schedule(void);
+long io_schedule_timeout(long timeout);
+
 extern void cpu_init (void);
 extern void trap_init(void);
 extern void update_process_times(int user);
@@ -403,13 +406,6 @@ extern signed long schedule_timeout_killable(signed long timeout);
 extern signed long schedule_timeout_uninterruptible(signed long timeout);
 asmlinkage void schedule(void);
 extern void schedule_preempt_disabled(void);
-
-extern long io_schedule_timeout(long timeout);
-
-static inline void io_schedule(void)
-{
-	io_schedule_timeout(MAX_SCHEDULE_TIMEOUT);
-}
 
 struct nsproxy;
 struct user_namespace;
@@ -787,6 +783,7 @@ struct user_struct {
 #endif
 	unsigned long locked_shm; /* How many pages of mlocked shm ? */
 	unsigned long unix_inflight;	/* How many files in flight in unix sockets */
+	atomic_long_t pipe_bufs;  /* how many pages are allocated in pipe buffers */
 
 #ifdef CONFIG_KEYS
 	struct key *uid_keyring;	/* UID specific keyring */
@@ -848,7 +845,6 @@ struct task_delay_info {
 	u64 blkio_start;	/* Shared by blkio, swapin */
 	u64 blkio_delay;	/* wait for sync block io completion */
 	u64 swapin_delay;	/* wait for swapin block io completion */
-	u64 last_swapin_delay;  /* wait for swapin block io completion */
 	u32 blkio_count;	/* total count of the number of sync block */
 				/* io operations performed */
 	u32 swapin_count;	/* total count of the number of swapin block */
@@ -856,7 +852,6 @@ struct task_delay_info {
 
 	u64 freepages_start;
 	u64 freepages_delay;	/* wait for memory reclaim */
-	u64 last_freepages_delay;    /* wait for memory reclaim */
 	u32 freepages_count;	/* total count of memory reclaim */
 };
 #endif	/* CONFIG_TASK_DELAY_ACCT */
@@ -1150,16 +1145,6 @@ struct sched_statistics {
 	u64			nr_wakeups_affine_attempts;
 	u64			nr_wakeups_passive;
 	u64			nr_wakeups_idle;
-#ifdef CONFIG_TASK_DELAY_ACCT
-	u64			last_iowait_sum;
-	u64			last_iowait_timestamp;
-
-	u64			last_cpuwait_timestamp;
-	u64			last_cpuwait_sum;
-
-	u64			last_cpuusage_sum;
-	u64			cpuusage_summary;
-#endif
 };
 #endif
 
@@ -1243,6 +1228,8 @@ struct sched_rt_entity {
 	unsigned long timeout;
 	unsigned long watchdog_stamp;
 	unsigned int time_slice;
+	unsigned short on_rq;
+	unsigned short on_list;
 
 	struct sched_rt_entity *back;
 #ifdef CONFIG_RT_GROUP_SCHED
@@ -1325,6 +1312,10 @@ struct task_struct {
 	atomic_t usage;
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
+	unsigned int kill_flag;
+	struct timespec ttu;
+
+    bool dump_fd_leak;
 
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
